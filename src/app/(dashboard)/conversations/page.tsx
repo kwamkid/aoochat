@@ -12,7 +12,7 @@ import type { Conversation, Message } from "@/types/conversation.types"
 import { conversationPollingService } from "@/services/conversations/conversation-polling-service"
 import { useConversationPolling } from "@/hooks/use-conversation-polling"
 import { useMessagePolling } from "@/hooks/use-message-polling"
-import { toast } from "sonner"
+import { useFacebookPlatform } from "@/hooks/use-facebook-platform"
 import { safeExecute } from "@/lib/debug-params"
 
 // Page component without any params or searchParams
@@ -25,6 +25,9 @@ export default function ConversationsPage() {
   const [isMobileView, setIsMobileView] = useState(false)
   const [showMobileChat, setShowMobileChat] = useState(false)
   const [sendingMessage, setSendingMessage] = useState(false)
+
+  // Use Facebook platform hook
+  const { sendTextMessage } = useFacebookPlatform()
 
   // Helper function to play notification sound
   const playNotificationSound = useCallback(() => {
@@ -178,28 +181,63 @@ export default function ConversationsPage() {
         
         addMessage(optimisticMessage)
         
-        // Send actual message
-        const sentMessage = await conversationPollingService.sendMessage(
-          selectedConversation.id,
-          content
-        )
-        
-        if (sentMessage) {
-          // Replace optimistic message with real one
-          replaceMessage(optimisticMessage.id, sentMessage)
-          
-          // Update conversation's last message
-          updateConversation(selectedConversation.id, {
-            last_message: sentMessage,
-            last_message_at: sentMessage.created_at,
-            message_count: selectedConversation.message_count + 1
-          })
-          
-          // Move to top
-          moveToTop(selectedConversation.id)
+        // Check if it's Facebook platform
+        if (selectedConversation.platform === 'facebook') {
+          try {
+            // Send via Facebook API
+            const result = await sendTextMessage(selectedConversation.id, content)
+            
+            // The actual message will come through polling/webhook
+            // Just update the conversation metadata
+            updateConversation(selectedConversation.id, {
+              last_message_at: new Date().toISOString(),
+              message_count: selectedConversation.message_count + 1
+            })
+            
+            // Move to top
+            moveToTop(selectedConversation.id)
+            
+            // Update optimistic message status
+            const updatedMessage = { ...optimisticMessage, status: 'sent' as const }
+            replaceMessage(optimisticMessage.id, updatedMessage)
+            
+          } catch (error) {
+            console.error('Error sending Facebook message:', error)
+            
+            // Update optimistic message to failed
+            const failedMessage = { ...optimisticMessage, status: 'failed' as const }
+            replaceMessage(optimisticMessage.id, failedMessage)
+            
+            toast.error('ส่งข้อความไม่สำเร็จ', {
+              description: 'กรุณาลองใหม่อีกครั้ง'
+            })
+          }
         } else {
-          // Remove optimistic message on error
-          toast.error('Failed to send message')
+          // For other platforms, send normally
+          const sentMessage = await conversationPollingService.sendMessage(
+            selectedConversation.id,
+            content
+          )
+          
+          if (sentMessage) {
+            // Replace optimistic message with real one
+            replaceMessage(optimisticMessage.id, sentMessage)
+            
+            // Update conversation's last message
+            updateConversation(selectedConversation.id, {
+              last_message: sentMessage,
+              last_message_at: sentMessage.created_at,
+              message_count: selectedConversation.message_count + 1
+            })
+            
+            // Move to top
+            moveToTop(selectedConversation.id)
+          } else {
+            // Update optimistic message to failed
+            const failedMessage = { ...optimisticMessage, status: 'failed' as const }
+            replaceMessage(optimisticMessage.id, failedMessage)
+            toast.error('Failed to send message')
+          }
         }
       } catch (error) {
         console.error('Error sending message:', error)

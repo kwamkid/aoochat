@@ -3,6 +3,8 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { useFacebookPlatform } from "@/hooks/use-facebook-platform"
+import { toast } from "sonner"
 import { 
   Send as SendIcon, 
   Paperclip, 
@@ -30,7 +32,9 @@ import {
   Trash2,
   Forward,
   Reply,
-  MessageCircle
+  MessageCircle,
+  RefreshCw,
+  UserCheck
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format, isToday, isYesterday } from "date-fns"
@@ -93,24 +97,99 @@ export function ChatView({
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [selectedMessages, setSelectedMessages] = useState<string[]>([])
   const [isRecording, setIsRecording] = useState(false)
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false)
+  const [profileData, setProfileData] = useState<any>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageContainerRef = useRef<HTMLDivElement>(null)
+
+  // Use Facebook Platform hook
+  const {
+    sendTextMessage,
+    sendImageMessage,
+    sendQuickReplies,
+    getProfile,
+    syncProfile,
+    sendingMessage
+  } = useFacebookPlatform()
 
   // Auto scroll to bottom on new messages
   useEffect(() => {
     scrollToBottom()
   }, [messages])
 
+  // Load Facebook profile when conversation changes
+  useEffect(() => {
+    if (conversation?.platform === 'facebook' && conversation.id) {
+      loadFacebookProfile()
+    }
+  }, [conversation?.id])
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
-  const handleSend = () => {
-    if (messageInput.trim()) {
-      onSendMessage(messageInput.trim())
-      setMessageInput("")
+  // Load Facebook profile
+  const loadFacebookProfile = async () => {
+    if (!conversation) return
+    
+    setIsLoadingProfile(true)
+    try {
+      const profile = await getProfile(undefined, conversation.id)
+      if (profile) {
+        setProfileData(profile)
+        toast.success('โหลดข้อมูลโปรไฟล์สำเร็จ')
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error)
+    } finally {
+      setIsLoadingProfile(false)
+    }
+  }
+
+  // Refresh Facebook profile
+  const refreshProfile = async () => {
+    if (!conversation?.customer?.id) return
+    
+    setIsLoadingProfile(true)
+    try {
+      const profile = await syncProfile(conversation.customer.id)
+      if (profile) {
+        setProfileData(profile)
+        toast.success('อัพเดทโปรไฟล์สำเร็จ')
+      }
+    } catch (error) {
+      toast.error('อัพเดทโปรไฟล์ไม่สำเร็จ')
+    } finally {
+      setIsLoadingProfile(false)
+    }
+  }
+
+  const handleSend = async () => {
+    if (messageInput.trim() && conversation) {
+      // Check if it's Facebook platform
+      if (conversation.platform === 'facebook') {
+        try {
+          // Send via Facebook API
+          await sendTextMessage(conversation.id, messageInput.trim())
+          
+          // Clear input immediately for better UX
+          setMessageInput("")
+          
+          // Also call the original handler to update local state
+          onSendMessage(messageInput.trim())
+          
+          toast.success('ส่งข้อความสำเร็จ')
+        } catch (error) {
+          toast.error('ส่งข้อความไม่สำเร็จ')
+          console.error('Error sending Facebook message:', error)
+        }
+      } else {
+        // For other platforms, use the original method
+        onSendMessage(messageInput.trim())
+        setMessageInput("")
+      }
     }
   }
 
@@ -189,11 +268,18 @@ export function ChatView({
               {conversation.customer.tags.includes('vip') && (
                 <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
               )}
+              {profileData && (
+                <span className="text-xs text-muted-foreground">
+                  ({profileData.name})
+                </span>
+              )}
             </h3>
             <p className="text-sm text-muted-foreground">
-              {typing ? (
+              {typing || sendingMessage ? (
                 <span className="flex items-center gap-1">
-                  <span className="animate-pulse">กำลังพิมพ์</span>
+                  <span className="animate-pulse">
+                    {sendingMessage ? 'กำลังส่ง...' : 'กำลังพิมพ์'}
+                  </span>
                   <span className="flex gap-1">
                     <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -208,6 +294,30 @@ export function ChatView({
         </div>
         
         <div className="flex items-center gap-2">
+          {conversation.platform === 'facebook' && (
+            <>
+              <button 
+                onClick={loadFacebookProfile}
+                disabled={isLoadingProfile}
+                className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                title="โหลดโปรไฟล์"
+              >
+                {isLoadingProfile ? (
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                ) : (
+                  <UserCheck className="w-5 h-5" />
+                )}
+              </button>
+              <button 
+                onClick={refreshProfile}
+                disabled={isLoadingProfile || !conversation.customer.id}
+                className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                title="รีเฟรชโปรไฟล์"
+              >
+                <RefreshCw className="w-5 h-5" />
+              </button>
+            </>
+          )}
           <button className="p-2 hover:bg-muted rounded-lg transition-colors">
             <Phone className="w-5 h-5" />
           </button>
@@ -383,7 +493,8 @@ export function ChatView({
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="พิมพ์ข้อความ..."
-              className="w-full h-11 px-4 py-2.5 pr-12 bg-muted/50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all overflow-hidden"
+              disabled={sendingMessage}
+              className="w-full h-11 px-4 py-2.5 pr-12 bg-muted/50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all overflow-hidden disabled:opacity-50"
               style={{ lineHeight: '1.5' }}
               rows={1}
             />
@@ -400,6 +511,7 @@ export function ChatView({
             {messageInput.trim() ? (
               <button
                 onClick={handleSend}
+                disabled={false} // Always allow clicking, don't disable
                 className="h-11 w-11 flex items-center justify-center bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
               >
                 <SendIcon className="w-5 h-5" />
