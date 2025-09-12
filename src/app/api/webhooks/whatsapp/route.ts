@@ -11,12 +11,12 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     
-    // Extract parameters directly without modifying
+    // Extract parameters without modifying the original object
     const mode = searchParams.get('hub.mode')
     const token = searchParams.get('hub.verify_token')
     const challenge = searchParams.get('hub.challenge')
     
-    // Create new params object instead of modifying existing one
+    // Create new params object for verification
     const verifyParams = {
       'hub.mode': mode,
       'hub.verify_token': token,
@@ -30,7 +30,12 @@ export async function GET(request: NextRequest) {
     )
     
     // Return challenge for verification
-    return new NextResponse(verifiedChallenge, { status: 200 })
+    return new NextResponse(verifiedChallenge, { 
+      status: 200,
+      headers: {
+        'Content-Type': 'text/plain'
+      }
+    })
   } catch (error) {
     console.error('WhatsApp webhook verification error:', error)
     return NextResponse.json(
@@ -58,7 +63,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true }, { status: 200 })
     }
     
-    // Create headers object safely
+    // Create headers object without mutation
     const headersObj: Record<string, string> = {}
     request.headers.forEach((value, key) => {
       headersObj[key] = value

@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     await facebookAPIClient.sendTypingIndicator(recipientId, true)
     
     // Handle array of messages (e.g., caption + image)
-    let results = []
+    const results = []
     if (Array.isArray(fbMessage)) {
       for (const msg of fbMessage) {
         const result = await facebookAPIClient.sendMessage(recipientId, msg)

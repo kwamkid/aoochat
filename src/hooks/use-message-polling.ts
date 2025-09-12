@@ -9,30 +9,42 @@ interface UseMessagePollingOptions {
   onNewMessage?: (message: Message) => void
   pollingInterval?: number
   enabled?: boolean
+  initialLimit?: number
 }
 
 export function useMessagePolling({
   conversationId,
   onNewMessage,
   pollingInterval = 2000,
-  enabled = true
+  enabled = true,
+  initialLimit = 30
 }: UseMessagePollingOptions) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [offset, setOffset] = useState(0)
+  
   const lastMessageIdRef = useRef<string | null>(null)
   const messageIdsSetRef = useRef<Set<string>>(new Set())
   const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isFirstLoadRef = useRef(true)
   const currentConversationIdRef = useRef<string | null>(null)
 
-  // Load initial messages
+  // Load initial messages (newest first, limited to initialLimit)
   const loadMessages = useCallback(async () => {
     if (!conversationId) return
 
     try {
-      console.log(`Loading initial messages for conversation: ${conversationId}`)
+      console.log(`Loading initial ${initialLimit} messages for conversation: ${conversationId}`)
       setLoading(true)
-      const data = await conversationPollingService.getMessages(conversationId)
+      
+      // Load only the most recent messages
+      const data = await conversationPollingService.getMessagesPaginated(
+        conversationId,
+        initialLimit,
+        0
+      )
       
       // Reset tracking on full reload
       messageIdsSetRef.current.clear()
@@ -46,8 +58,10 @@ export function useMessagePolling({
       
       console.log(`Loaded ${uniqueMessages.length} initial messages`)
       setMessages(uniqueMessages)
+      setOffset(uniqueMessages.length)
+      setHasMore(uniqueMessages.length >= initialLimit)
       
-      // Update last message ID
+      // Update last message ID (the newest message)
       if (uniqueMessages.length > 0) {
         lastMessageIdRef.current = uniqueMessages[uniqueMessages.length - 1].id
         console.log(`Last message ID set to: ${lastMessageIdRef.current}`)
@@ -60,7 +74,49 @@ export function useMessagePolling({
     } finally {
       setLoading(false)
     }
-  }, [conversationId])
+  }, [conversationId, initialLimit])
+
+  // Load more older messages
+  const loadMoreMessages = useCallback(async () => {
+    if (!conversationId || !hasMore || loadingMore) return
+
+    try {
+      console.log(`Loading more messages from offset: ${offset}`)
+      setLoadingMore(true)
+      
+      // Load older messages
+      const olderMessages = await conversationPollingService.getMessagesPaginated(
+        conversationId,
+        20, // Load 20 more at a time
+        offset
+      )
+      
+      // Filter out duplicates
+      const uniqueOlderMessages = olderMessages.filter(msg => {
+        if (messageIdsSetRef.current.has(msg.id)) {
+          return false
+        }
+        messageIdsSetRef.current.add(msg.id)
+        return true
+      })
+      
+      console.log(`Loaded ${uniqueOlderMessages.length} older messages`)
+      
+      if (uniqueOlderMessages.length > 0) {
+        // Prepend older messages to the beginning
+        setMessages(prev => [...uniqueOlderMessages, ...prev])
+        setOffset(prev => prev + uniqueOlderMessages.length)
+      }
+      
+      // Check if there are more messages to load
+      setHasMore(uniqueOlderMessages.length >= 20)
+      
+    } catch (error) {
+      console.error('Error loading more messages:', error)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [conversationId, offset, hasMore, loadingMore])
 
   // Poll for new messages
   const pollNewMessages = useCallback(async () => {
@@ -162,6 +218,8 @@ export function useMessagePolling({
       console.log(`Conversation changed from ${currentConversationIdRef.current} to ${conversationId}`)
       currentConversationIdRef.current = conversationId
       setMessages([])
+      setOffset(0)
+      setHasMore(true)
       messageIdsSetRef.current.clear()
       lastMessageIdRef.current = null
       isFirstLoadRef.current = true
@@ -196,8 +254,11 @@ export function useMessagePolling({
   return {
     messages,
     loading,
+    loadingMore,
+    hasMore,
     addMessage,
     replaceMessage,
+    loadMoreMessages,
     refresh: loadMessages
   }
 }

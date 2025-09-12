@@ -1,7 +1,6 @@
 // src/hooks/use-facebook-platform.ts
 
 import { useState, useCallback } from 'react'
-import { toast } from 'sonner'
 
 interface SendMessageOptions {
   conversationId: string
@@ -58,9 +57,16 @@ export function useFacebookPlatform() {
       
     } catch (error) {
       console.error('Error sending Facebook message:', error)
-      toast.error('ส่งข้อความไม่สำเร็จ', {
-        description: error instanceof Error ? error.message : 'Unknown error'
-      })
+      
+      // Log detailed error information
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        })
+      }
+      
       throw error
     } finally {
       setSendingMessage(false)
@@ -98,9 +104,15 @@ export function useFacebookPlatform() {
       
     } catch (error) {
       console.error('Error fetching Facebook profile:', error)
-      toast.error('ดึงข้อมูลโปรไฟล์ไม่สำเร็จ', {
-        description: error instanceof Error ? error.message : 'Unknown error'
-      })
+      
+      // Log detailed error information
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack
+        })
+      }
+      
       return null
     } finally {
       setFetchingProfile(false)
@@ -126,14 +138,20 @@ export function useFacebookPlatform() {
         throw new Error(data.error || 'Failed to sync profile')
       }
       
-      toast.success('อัพเดทโปรไฟล์สำเร็จ')
+      console.log('อัพเดทโปรไฟล์สำเร็จ')
       return data.profile
       
     } catch (error) {
       console.error('Error syncing Facebook profile:', error)
-      toast.error('อัพเดทโปรไฟล์ไม่สำเร็จ', {
-        description: error instanceof Error ? error.message : 'Unknown error'
-      })
+      
+      // Log detailed error information
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack
+        })
+      }
+      
       throw error
     }
   }, [])

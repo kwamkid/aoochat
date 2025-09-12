@@ -15,7 +15,7 @@ import { useMessagePolling } from "@/hooks/use-message-polling"
 import { useFacebookPlatform } from "@/hooks/use-facebook-platform"
 import { safeExecute } from "@/lib/debug-params"
 
-// Page component without any params or searchParams
+// Remove any params or searchParams - this is a client component
 export default function ConversationsPage() {
   console.log('[ConversationsPage] Rendering')
   
@@ -61,14 +61,7 @@ export default function ConversationsPage() {
   } = useConversationPolling({
     onNewConversation: (conversation) => {
       safeExecute(() => {
-        toast.success('New conversation!', {
-          description: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
-          duration: 5000,
-          action: {
-            label: 'View',
-            onClick: () => setSelectedConversation(conversation)
-          }
-        })
+        console.log('New conversation:', conversation.customer.name)
         playNotificationSound()
         
         // Browser notification
@@ -88,14 +81,7 @@ export default function ConversationsPage() {
       safeExecute(() => {
         // Only notify if not the current conversation
         if (conversation.id !== selectedConversation?.id) {
-          toast.info('New message!', {
-            description: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
-            duration: 4000,
-            action: {
-              label: 'View',
-              onClick: () => setSelectedConversation(conversation)
-            }
-          })
+          console.log('New message from:', conversation.customer.name)
           playNotificationSound()
         }
       }, 'onNewMessage callback')
@@ -187,7 +173,7 @@ export default function ConversationsPage() {
             // Send via Facebook API
             const result = await sendTextMessage(selectedConversation.id, content)
             
-            // The actual message will come through polling/webhook
+            // DON'T add the message here - wait for it to come from webhook/polling
             // Just update the conversation metadata
             updateConversation(selectedConversation.id, {
               last_message_at: new Date().toISOString(),
@@ -197,9 +183,12 @@ export default function ConversationsPage() {
             // Move to top
             moveToTop(selectedConversation.id)
             
-            // Update optimistic message status
+            // Remove the optimistic message when real one arrives
+            // For now, just mark it as sent
             const updatedMessage = { ...optimisticMessage, status: 'sent' as const }
             replaceMessage(optimisticMessage.id, updatedMessage)
+            
+            console.log('Message sent successfully via Facebook')
             
           } catch (error) {
             console.error('Error sending Facebook message:', error)
@@ -208,9 +197,8 @@ export default function ConversationsPage() {
             const failedMessage = { ...optimisticMessage, status: 'failed' as const }
             replaceMessage(optimisticMessage.id, failedMessage)
             
-            toast.error('ส่งข้อความไม่สำเร็จ', {
-              description: 'กรุณาลองใหม่อีกครั้ง'
-            })
+            // Show error in console instead of toast
+            console.error('ส่งข้อความไม่สำเร็จ - กรุณาลองใหม่อีกครั้ง')
           }
         } else {
           // For other platforms, send normally
@@ -236,12 +224,13 @@ export default function ConversationsPage() {
             // Update optimistic message to failed
             const failedMessage = { ...optimisticMessage, status: 'failed' as const }
             replaceMessage(optimisticMessage.id, failedMessage)
-            toast.error('Failed to send message')
+            console.error('Failed to send message')
           }
         }
       } catch (error) {
         console.error('Error sending message:', error)
-        toast.error('Failed to send message')
+        // Show error in console instead of toast
+        console.error('Failed to send message - check console for details')
       } finally {
         setSendingMessage(false)
       }
@@ -352,6 +341,9 @@ export default function ConversationsPage() {
             conversation={selectedConversation}
             messages={messages}
             onSendMessage={handleSendMessage}
+            onLoadMore={loadMoreMessages}
+            loading={messagesLoadingMore}
+            hasMore={hasMoreMessages}
             typing={sendingMessage}
           />
         )}

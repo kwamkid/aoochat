@@ -4,7 +4,6 @@
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useFacebookPlatform } from "@/hooks/use-facebook-platform"
-import { toast } from "sonner"
 import { 
   Send as SendIcon, 
   Paperclip, 
@@ -139,7 +138,7 @@ export function ChatView({
       const profile = await getProfile(undefined, conversation.id)
       if (profile) {
         setProfileData(profile)
-        toast.success('โหลดข้อมูลโปรไฟล์สำเร็จ')
+        console.log('โหลดข้อมูลโปรไฟล์สำเร็จ:', profile)
       }
     } catch (error) {
       console.error('Error loading profile:', error)
@@ -157,10 +156,10 @@ export function ChatView({
       const profile = await syncProfile(conversation.customer.id)
       if (profile) {
         setProfileData(profile)
-        toast.success('อัพเดทโปรไฟล์สำเร็จ')
+        console.log('อัพเดทโปรไฟล์สำเร็จ:', profile)
       }
     } catch (error) {
-      toast.error('อัพเดทโปรไฟล์ไม่สำเร็จ')
+      console.error('อัพเดทโปรไฟล์ไม่สำเร็จ:', error)
     } finally {
       setIsLoadingProfile(false)
     }
@@ -177,12 +176,12 @@ export function ChatView({
           // Clear input immediately for better UX
           setMessageInput("")
           
-          // Also call the original handler to update local state
-          onSendMessage(messageInput.trim())
+          // DON'T call onSendMessage here - it's already handled in conversations/page.tsx
+          // The message will be added through the optimistic update in handleSendMessage
           
-          toast.success('ส่งข้อความสำเร็จ')
+          console.log('ส่งข้อความสำเร็จ')
         } catch (error) {
-          toast.error('ส่งข้อความไม่สำเร็จ')
+          console.error('ส่งข้อความไม่สำเร็จ:', error)
           console.error('Error sending Facebook message:', error)
         }
       } else {
@@ -337,16 +336,24 @@ export function ChatView({
       <div 
         ref={messageContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4"
+        onScroll={handleScroll}
       >
+        {/* Load More Button/Indicator */}
         {hasMore && (
           <div className="text-center py-2">
-            <button
-              onClick={onLoadMore}
-              disabled={loading}
-              className="text-sm text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50"
-            >
-              {loading ? "กำลังโหลด..." : "โหลดข้อความเก่า"}
-            </button>
+            {loading ? (
+              <div className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm text-muted-foreground">กำลังโหลดข้อความเก่า...</span>
+              </div>
+            ) : (
+              <button
+                onClick={onLoadMore}
+                className="text-sm text-brand-600 dark:text-brand-400 hover:underline"
+              >
+                โหลดข้อความเก่า
+              </button>
+            )}
           </div>
         )}
 
@@ -511,7 +518,7 @@ export function ChatView({
             {messageInput.trim() ? (
               <button
                 onClick={handleSend}
-                disabled={false} // Always allow clicking, don't disable
+                disabled={false}
                 className="h-11 w-11 flex items-center justify-center bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
               >
                 <SendIcon className="w-5 h-5" />

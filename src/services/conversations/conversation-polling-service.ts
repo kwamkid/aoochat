@@ -171,6 +171,52 @@ export class ConversationPollingService {
   }
 
   /**
+   * Get messages with pagination support
+   * Returns messages in chronological order (oldest to newest)
+   */
+  async getMessagesPaginated(conversationId: string, limit = 30, offset = 0) {
+    try {
+      console.log(`Getting paginated messages: limit=${limit}, offset=${offset}`)
+      
+      // First, get total count
+      const { count } = await this.supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('conversation_id', conversationId)
+      
+      const totalMessages = count || 0
+      console.log(`Total messages in conversation: ${totalMessages}`)
+      
+      // Calculate the actual offset from the end
+      // We want to get the newest messages first
+      const startIndex = Math.max(0, totalMessages - offset - limit)
+      const endIndex = totalMessages - offset - 1
+      
+      console.log(`Fetching messages from index ${startIndex} to ${endIndex}`)
+      
+      const { data, error } = await this.supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+        .range(startIndex, endIndex)
+
+      if (error) {
+        console.error('Error fetching paginated messages:', error)
+        return []
+      }
+
+      const messages = (data || []).map(msg => this.transformMessage(msg))
+      console.log(`Fetched ${messages.length} messages`)
+      
+      return messages
+    } catch (error) {
+      console.error('Error in getMessagesPaginated:', error)
+      return []
+    }
+  }
+
+  /**
    * Poll for new messages in a conversation
    */
   async pollMessages(conversationId: string, lastMessageId?: string) {
