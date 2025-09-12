@@ -1,3 +1,4 @@
+// src/app/(dashboard)/dashboard/page.tsx
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
@@ -7,11 +8,11 @@ export default async function DashboardPage() {
   const { data: { user }, error } = await supabase.auth.getUser()
   
   if (error || !user) {
-    redirect('/auth/login')
+    redirect('/login')
   }
 
   return (
-    <div className="min-h-screen p-8">
+    <div className="p-6 lg:p-8">
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold mb-4">Dashboard</h1>
         <div className="bg-card p-6 rounded-lg border">

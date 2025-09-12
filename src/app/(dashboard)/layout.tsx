@@ -1,3 +1,4 @@
+// src/app/(dashboard)/layout.tsx
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/dashboard/sidebar'
@@ -16,7 +17,7 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex">
       {/* Mobile Sidebar Overlay */}
       <Sidebar className="fixed inset-y-0 z-50 w-72 lg:hidden" />
       
@@ -24,14 +25,12 @@ export default async function DashboardLayout({
       <Sidebar className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-72 lg:flex-col" />
       
       {/* Main Content */}
-      <div className="lg:pl-72">
+      <div className="flex-1 lg:pl-72 flex flex-col">
         <Header user={user} />
         
-        {/* Page Content */}
-        <main className="py-6">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            {children}
-          </div>
+        {/* Page Content - No padding for full-width pages */}
+        <main className="flex-1 flex flex-col">
+          {children}
         </main>
       </div>
     </div>
