@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     
-    // Extract parameters directly without creating object
+    // Extract parameters directly without modifying
     const mode = searchParams.get('hub.mode')
     const token = searchParams.get('hub.verify_token')
     const challenge = searchParams.get('hub.challenge')
@@ -23,8 +23,8 @@ export async function GET(request: NextRequest) {
       challenge: challenge ? 'provided' : 'missing'
     })
     
-    // Create params object for webhook handler
-    const params = {
+    // Create new params object instead of modifying existing one
+    const verifyParams = {
       'hub.mode': mode,
       'hub.verify_token': token,
       'hub.challenge': challenge
@@ -32,8 +32,8 @@ export async function GET(request: NextRequest) {
     
     const verifiedChallenge = await webhookHandler.verifyChallenge(
       'facebook',
-      params,
-      Object.fromEntries(request.headers.entries())
+      verifyParams,
+      {} // Empty headers for verification
     )
     
     // Return challenge for verification
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     if (signature && appSecret) {
       const expectedSignature = crypto
         .createHmac('sha256', appSecret)
-        .update(rawBody) // Use raw body string, not parsed JSON
+        .update(rawBody)
         .digest('hex')
       
       const actualSignature = signature.split('sha256=')[1]
@@ -84,21 +84,22 @@ export async function POST(request: NextRequest) {
       
       if (expectedSignature !== actualSignature) {
         console.warn('⚠️ Signature mismatch - continuing for development')
-        // For development, we'll continue anyway
-        // In production, you should return an error
       }
     } else {
       console.warn('⚠️ No signature or app secret - skipping verification')
     }
     
-    // Process webhook with custom headers that include raw body
-    const headers = Object.fromEntries(request.headers.entries())
-    headers['x-raw-body'] = rawBody // Pass raw body in headers for verification
+    // Create headers object safely
+    const headersObj: Record<string, string> = {}
+    request.headers.forEach((value, key) => {
+      headersObj[key] = value
+    })
+    headersObj['x-raw-body'] = rawBody
     
     const result = await webhookHandler.processWebhook(
       'facebook',
       body,
-      headers
+      headersObj
     )
     
     if (!result.success) {

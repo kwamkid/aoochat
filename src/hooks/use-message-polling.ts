@@ -25,7 +25,44 @@ export function useMessagePolling({
   const isFirstLoadRef = useRef(true)
   const currentConversationIdRef = useRef<string | null>(null)
 
-  // Poll for new messages only - declare this first
+  // Load initial messages
+  const loadMessages = useCallback(async () => {
+    if (!conversationId) return
+
+    try {
+      console.log(`Loading initial messages for conversation: ${conversationId}`)
+      setLoading(true)
+      const data = await conversationPollingService.getMessages(conversationId)
+      
+      // Reset tracking on full reload
+      messageIdsSetRef.current.clear()
+      const uniqueMessages = data.filter(msg => {
+        if (messageIdsSetRef.current.has(msg.id)) {
+          return false
+        }
+        messageIdsSetRef.current.add(msg.id)
+        return true
+      })
+      
+      console.log(`Loaded ${uniqueMessages.length} initial messages`)
+      setMessages(uniqueMessages)
+      
+      // Update last message ID
+      if (uniqueMessages.length > 0) {
+        lastMessageIdRef.current = uniqueMessages[uniqueMessages.length - 1].id
+        console.log(`Last message ID set to: ${lastMessageIdRef.current}`)
+      }
+      
+      isFirstLoadRef.current = false
+    } catch (error) {
+      console.error('Error loading messages:', error)
+      isFirstLoadRef.current = false
+    } finally {
+      setLoading(false)
+    }
+  }, [conversationId])
+
+  // Poll for new messages
   const pollNewMessages = useCallback(async () => {
     if (!conversationId || !enabled) return
 
@@ -56,11 +93,13 @@ export function useMessagePolling({
         if (uniqueNewMessages.length > 0) {
           setMessages(prev => {
             console.log(`Current messages: ${prev.length}, Adding: ${uniqueNewMessages.length}`)
-            return [...prev, ...uniqueNewMessages]
+            const updated = [...prev, ...uniqueNewMessages]
+            
+            // Update last message ID
+            lastMessageIdRef.current = uniqueNewMessages[uniqueNewMessages.length - 1].id
+            
+            return updated
           })
-          
-          // Update last message ID
-          lastMessageIdRef.current = uniqueNewMessages[uniqueNewMessages.length - 1].id
           
           // Notify about new messages
           uniqueNewMessages.forEach(msg => {
@@ -76,65 +115,23 @@ export function useMessagePolling({
     }
   }, [conversationId, enabled, onNewMessage])
 
-  // Load initial messages
-  const loadMessages = useCallback(async () => {
-    if (!conversationId) return
-
-    try {
-      console.log(`Loading initial messages for conversation: ${conversationId}`)
-      setLoading(true)
-      const data = await conversationPollingService.getMessages(conversationId)
-      
-      // Reset tracking on full reload
-      messageIdsSetRef.current.clear()
-      const uniqueMessages = data.filter(msg => {
-        if (messageIdsSetRef.current.has(msg.id)) {
-          return false
-        }
-        messageIdsSetRef.current.add(msg.id)
-        return true
-      })
-      
-      console.log(`Loaded ${uniqueMessages.length} initial messages`)
-      setMessages(uniqueMessages)
-      
-      // Update last message ID
-      if (uniqueMessages.length > 0) {
-        lastMessageIdRef.current = uniqueMessages[uniqueMessages.length - 1].id
-        console.log(`Last message ID set to: ${lastMessageIdRef.current}`)
-      }
-      
-      isFirstLoadRef.current = false
-      
-      // Start polling immediately after initial load
-      if (enabled) {
-        console.log('Starting message polling after initial load')
-        const poll = () => {
-          pollNewMessages()
-          pollingTimeoutRef.current = setTimeout(poll, pollingInterval)
-        }
-        pollingTimeoutRef.current = setTimeout(poll, pollingInterval)
-      }
-    } catch (error) {
-      console.error('Error loading messages:', error)
-      isFirstLoadRef.current = false
-    } finally {
-      setLoading(false)
-    }
-  }, [conversationId, enabled, pollingInterval, pollNewMessages])
-
   // Add message manually (for optimistic updates)
   const addMessage = useCallback((message: Message) => {
     if (!messageIdsSetRef.current.has(message.id)) {
       messageIdsSetRef.current.add(message.id)
       setMessages(prev => [...prev, message])
-      lastMessageIdRef.current = message.id
+      
+      // Don't update lastMessageIdRef for temporary messages
+      if (!message.id.startsWith('temp-')) {
+        lastMessageIdRef.current = message.id
+      }
     }
   }, [])
 
   // Replace temporary message with real one
   const replaceMessage = useCallback((tempId: string, realMessage: Message) => {
     setMessages(prev => {
+      // Remove temp message
       const filtered = prev.filter(msg => msg.id !== tempId)
       
       // Check if real message already exists
@@ -142,15 +139,17 @@ export function useMessagePolling({
         return filtered
       }
       
+      // Remove temp ID and add real ID
       messageIdsSetRef.current.delete(tempId)
       messageIdsSetRef.current.add(realMessage.id)
       lastMessageIdRef.current = realMessage.id
       
+      // Add real message at the end
       return [...filtered, realMessage]
     })
   }, [])
 
-  // Setup polling - fixed to prevent infinite loops
+  // Setup polling
   useEffect(() => {
     // Clear previous polling
     if (pollingTimeoutRef.current) {
@@ -173,6 +172,17 @@ export function useMessagePolling({
       }
     }
 
+    // Setup polling after initial load
+    if (conversationId && enabled && !isFirstLoadRef.current) {
+      const poll = () => {
+        pollNewMessages()
+        pollingTimeoutRef.current = setTimeout(poll, pollingInterval)
+      }
+      
+      // Start polling
+      pollingTimeoutRef.current = setTimeout(poll, pollingInterval)
+    }
+
     // Cleanup
     return () => {
       if (pollingTimeoutRef.current) {
@@ -181,7 +191,7 @@ export function useMessagePolling({
         pollingTimeoutRef.current = null
       }
     }
-  }, [conversationId, loadMessages])
+  }, [conversationId, enabled, pollingInterval, loadMessages, pollNewMessages])
 
   return {
     messages,

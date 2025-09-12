@@ -11,13 +11,13 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     
-    // Extract parameters directly
+    // Extract parameters directly without modifying
     const mode = searchParams.get('hub.mode')
     const token = searchParams.get('hub.verify_token')
     const challenge = searchParams.get('hub.challenge')
     
-    // Create params object for webhook handler
-    const params = {
+    // Create new params object instead of modifying existing one
+    const verifyParams = {
       'hub.mode': mode,
       'hub.verify_token': token,
       'hub.challenge': challenge
@@ -25,8 +25,8 @@ export async function GET(request: NextRequest) {
     
     const verifiedChallenge = await webhookHandler.verifyChallenge(
       'whatsapp',
-      params,
-      Object.fromEntries(request.headers.entries())
+      verifyParams,
+      {} // Empty headers for verification
     )
     
     // Return challenge for verification
@@ -46,13 +46,29 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const headers = Object.fromEntries(request.headers.entries())
+    // Get raw body text
+    const rawBody = await request.text()
+    
+    // Parse JSON
+    let body: any
+    try {
+      body = JSON.parse(rawBody)
+    } catch (e) {
+      console.error('Failed to parse WhatsApp webhook body:', e)
+      return NextResponse.json({ received: true }, { status: 200 })
+    }
+    
+    // Create headers object safely
+    const headersObj: Record<string, string> = {}
+    request.headers.forEach((value, key) => {
+      headersObj[key] = value
+    })
+    headersObj['x-raw-body'] = rawBody
     
     const result = await webhookHandler.processWebhook(
       'whatsapp',
       body,
-      headers
+      headersObj
     )
     
     if (!result.success) {

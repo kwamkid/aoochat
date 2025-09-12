@@ -253,22 +253,25 @@ export class ConversationPollingService {
         return null
       }
 
-      // Get current conversation to update message count
+      // Update conversation's last message time and count
       const { data: conv } = await this.supabase
         .from('conversations')
         .select('message_count')
         .eq('id', conversationId)
         .single()
 
-      // Update conversation
-      await this.supabase
+      const { error: updateError } = await this.supabase
         .from('conversations')
         .update({
-          last_message_at: new Date().toISOString(),
+          last_message_at: data.created_at,
           message_count: (conv?.message_count || 0) + 1,
           updated_at: new Date().toISOString()
         })
         .eq('id', conversationId)
+
+      if (updateError) {
+        console.error('Error updating conversation:', updateError)
+      }
 
       return this.transformMessage(data)
     } catch (error) {
@@ -333,7 +336,7 @@ export class ConversationPollingService {
         avatar_url: customer?.avatar_url,
         platform_identities: customer?.platform_identities || {},
         tags: customer?.tags || [],
-        last_contact_at: customer?.last_contact_at || data.last_message_at,
+        last_contact_at: customer?.last_contact_at || data.last_message_at || data.created_at,
         total_conversations: customer?.total_conversations || 1,
         total_spent: customer?.total_spent || 0,
         engagement_score: customer?.engagement_score || 50,
@@ -351,7 +354,7 @@ export class ConversationPollingService {
         avatar_url: undefined
       } : undefined,
       last_message: lastMessage ? this.transformMessage(lastMessage) : undefined,
-      last_message_at: data.last_message_at,
+      last_message_at: data.last_message_at || data.created_at,
       first_response_at: data.first_response_at,
       message_count: data.message_count || messages.length || 0,
       unread_count: data.unread_count || 0,

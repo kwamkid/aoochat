@@ -13,8 +13,13 @@ import { conversationPollingService } from "@/services/conversations/conversatio
 import { useConversationPolling } from "@/hooks/use-conversation-polling"
 import { useMessagePolling } from "@/hooks/use-message-polling"
 import { toast } from "sonner"
+import { safeExecute } from "@/lib/debug-params"
 
+// Page component without any params or searchParams
 export default function ConversationsPage() {
+  console.log('[ConversationsPage] Rendering')
+  
+  // All state management
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [showCustomerInfo, setShowCustomerInfo] = useState(false)
   const [isMobileView, setIsMobileView] = useState(false)
@@ -23,23 +28,25 @@ export default function ConversationsPage() {
 
   // Helper function to play notification sound
   const playNotificationSound = useCallback(() => {
-    try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-      const oscillator = audioContext.createOscillator()
-      const gainNode = audioContext.createGain()
-      
-      oscillator.connect(gainNode)
-      gainNode.connect(audioContext.destination)
-      
-      oscillator.frequency.value = 800
-      oscillator.type = 'sine'
-      gainNode.gain.value = 0.1
-      
-      oscillator.start(audioContext.currentTime)
-      oscillator.stop(audioContext.currentTime + 0.1)
-    } catch (e) {
-      console.log('Could not play sound:', e)
-    }
+    safeExecute(() => {
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const oscillator = audioContext.createOscillator()
+        const gainNode = audioContext.createGain()
+        
+        oscillator.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+        
+        oscillator.frequency.value = 800
+        oscillator.type = 'sine'
+        gainNode.gain.value = 0.1
+        
+        oscillator.start(audioContext.currentTime)
+        oscillator.stop(audioContext.currentTime + 0.1)
+      } catch (e) {
+        console.log('Could not play sound:', e)
+      }
+    }, 'playNotificationSound')
   }, [])
 
   // Use conversation polling hook
@@ -50,37 +57,45 @@ export default function ConversationsPage() {
     moveToTop
   } = useConversationPolling({
     onNewConversation: (conversation) => {
-      toast.success('New conversation!', {
-        description: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
-        duration: 5000,
-        action: {
-          label: 'View',
-          onClick: () => setSelectedConversation(conversation)
-        }
-      })
-      playNotificationSound()
-      
-      // Browser notification
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('New conversation!', {
-          body: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
-          icon: '/icon.png'
-        })
-      }
-    },
-    onNewMessage: (conversation) => {
-      // Only notify if not the current conversation
-      if (conversation.id !== selectedConversation?.id) {
-        toast.info('New message!', {
+      safeExecute(() => {
+        toast.success('New conversation!', {
           description: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
-          duration: 4000,
+          duration: 5000,
           action: {
             label: 'View',
             onClick: () => setSelectedConversation(conversation)
           }
         })
         playNotificationSound()
-      }
+        
+        // Browser notification
+        if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification('New conversation!', {
+              body: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
+              icon: '/icon.png'
+            })
+          } catch (e) {
+            console.log('Could not show notification:', e)
+          }
+        }
+      }, 'onNewConversation callback')
+    },
+    onNewMessage: (conversation) => {
+      safeExecute(() => {
+        // Only notify if not the current conversation
+        if (conversation.id !== selectedConversation?.id) {
+          toast.info('New message!', {
+            description: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
+            duration: 4000,
+            action: {
+              label: 'View',
+              onClick: () => setSelectedConversation(conversation)
+            }
+          })
+          playNotificationSound()
+        }
+      }, 'onNewMessage callback')
     }
   })
 
@@ -93,10 +108,12 @@ export default function ConversationsPage() {
   } = useMessagePolling({
     conversationId: selectedConversation?.id || null,
     onNewMessage: (message) => {
-      // Play sound for new customer messages
-      if (message.sender_type === 'customer') {
-        playNotificationSound()
-      }
+      safeExecute(() => {
+        // Play sound for new customer messages
+        if (message.sender_type === 'customer') {
+          playNotificationSound()
+        }
+      }, 'useMessagePolling onNewMessage')
     },
     enabled: !!selectedConversation
   })
@@ -104,7 +121,9 @@ export default function ConversationsPage() {
   // Check if mobile view
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobileView(window.innerWidth < 768)
+      safeExecute(() => {
+        setIsMobileView(window.innerWidth < 768)
+      }, 'checkMobile')
     }
     checkMobile()
     window.addEventListener('resize', checkMobile)
@@ -113,76 +132,82 @@ export default function ConversationsPage() {
 
   // Request notification permission on mount
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission()
-    }
+    safeExecute(() => {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(console.log)
+      }
+    }, 'Request notification permission')
   }, [])
 
   // Handle conversation selection
   useEffect(() => {
     if (selectedConversation) {
-      // Mark as read
-      conversationPollingService.markAsRead(selectedConversation.id)
-      
-      if (isMobileView) {
-        setShowMobileChat(true)
-      }
+      safeExecute(() => {
+        // Mark as read
+        conversationPollingService.markAsRead(selectedConversation.id).catch(console.error)
+        
+        if (isMobileView) {
+          setShowMobileChat(true)
+        }
+      }, 'Handle conversation selection')
     }
   }, [selectedConversation, isMobileView])
 
   const handleSendMessage = async (content: string) => {
     if (!selectedConversation || !content.trim()) return
 
-    try {
-      setSendingMessage(true)
-      
-      // Add optimistic message
-      const optimisticMessage: Message = {
-        id: `temp-${Date.now()}`,
-        conversation_id: selectedConversation.id,
-        sender_type: "agent",
-        sender_id: "current_user",
-        sender_name: "You",
-        message_type: "text",
-        content: { text: content },
-        is_private: false,
-        is_automated: false,
-        status: "sending",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
-      
-      addMessage(optimisticMessage)
-      
-      // Send actual message
-      const sentMessage = await conversationPollingService.sendMessage(
-        selectedConversation.id,
-        content
-      )
-      
-      if (sentMessage) {
-        // Replace optimistic message with real one
-        replaceMessage(optimisticMessage.id, sentMessage)
+    await safeExecute(async () => {
+      try {
+        setSendingMessage(true)
         
-        // Update conversation's last message
-        updateConversation(selectedConversation.id, {
-          last_message: sentMessage,
-          last_message_at: sentMessage.created_at,
-          message_count: selectedConversation.message_count + 1
-        })
+        // Add optimistic message
+        const optimisticMessage: Message = {
+          id: `temp-${Date.now()}`,
+          conversation_id: selectedConversation.id,
+          sender_type: "agent",
+          sender_id: "current_user",
+          sender_name: "You",
+          message_type: "text",
+          content: { text: content },
+          is_private: false,
+          is_automated: false,
+          status: "sending",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
         
-        // Move to top
-        moveToTop(selectedConversation.id)
-      } else {
-        // Remove optimistic message on error
+        addMessage(optimisticMessage)
+        
+        // Send actual message
+        const sentMessage = await conversationPollingService.sendMessage(
+          selectedConversation.id,
+          content
+        )
+        
+        if (sentMessage) {
+          // Replace optimistic message with real one
+          replaceMessage(optimisticMessage.id, sentMessage)
+          
+          // Update conversation's last message
+          updateConversation(selectedConversation.id, {
+            last_message: sentMessage,
+            last_message_at: sentMessage.created_at,
+            message_count: selectedConversation.message_count + 1
+          })
+          
+          // Move to top
+          moveToTop(selectedConversation.id)
+        } else {
+          // Remove optimistic message on error
+          toast.error('Failed to send message')
+        }
+      } catch (error) {
+        console.error('Error sending message:', error)
         toast.error('Failed to send message')
+      } finally {
+        setSendingMessage(false)
       }
-    } catch (error) {
-      console.error('Error sending message:', error)
-      toast.error('Failed to send message')
-    } finally {
-      setSendingMessage(false)
-    }
+    }, 'handleSendMessage')
   }
 
   // Mobile view - show either list or chat
@@ -206,8 +231,10 @@ export default function ConversationsPage() {
                   conversations={conversations}
                   selectedId={selectedConversation?.id}
                   onSelect={(conv) => {
-                    setSelectedConversation(conv)
-                    setShowMobileChat(true)
+                    safeExecute(() => {
+                      setSelectedConversation(conv)
+                      setShowMobileChat(true)
+                    }, 'Mobile conversation select')
                   }}
                 />
               )}
@@ -223,7 +250,7 @@ export default function ConversationsPage() {
               {/* Mobile Chat Header with Back Button */}
               <div className="px-4 py-2 border-b bg-card flex items-center gap-2">
                 <button
-                  onClick={() => setShowMobileChat(false)}
+                  onClick={() => safeExecute(() => setShowMobileChat(false), 'Mobile back button')}
                   className="p-2 hover:bg-muted rounded-lg transition-colors"
                 >
                   <ChevronLeft className="w-5 h-5" />
@@ -271,7 +298,7 @@ export default function ConversationsPage() {
           <ConversationList
             conversations={conversations}
             selectedId={selectedConversation?.id}
-            onSelect={setSelectedConversation}
+            onSelect={(conv) => safeExecute(() => setSelectedConversation(conv), 'Desktop conversation select')}
           />
         )}
       </div>
@@ -304,7 +331,7 @@ export default function ConversationsPage() {
             <CustomerInfo
               customer={selectedConversation.customer}
               conversation={selectedConversation}
-              onClose={() => setShowCustomerInfo(false)}
+              onClose={() => safeExecute(() => setShowCustomerInfo(false), 'Close customer info')}
             />
           </motion.div>
         )}
@@ -313,7 +340,7 @@ export default function ConversationsPage() {
       {/* Toggle Customer Info Button */}
       {selectedConversation && (
         <button
-          onClick={() => setShowCustomerInfo(!showCustomerInfo)}
+          onClick={() => safeExecute(() => setShowCustomerInfo(!showCustomerInfo), 'Toggle customer info')}
           className={cn(
             "absolute right-0 top-1/2 -translate-y-1/2 p-2 bg-card border-l border-t border-b rounded-l-lg shadow-md transition-all hover:bg-muted z-10",
             showCustomerInfo ? "right-80" : "right-0"

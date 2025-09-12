@@ -9,13 +9,31 @@ import { webhookHandler } from '@/services/webhook/webhook-handler'
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const headers = Object.fromEntries(request.headers.entries())
+    // Get raw body text first
+    const rawBody = await request.text()
+    
+    // Parse JSON
+    let body: any
+    try {
+      body = JSON.parse(rawBody)
+    } catch (e) {
+      console.error('Failed to parse LINE webhook body:', e)
+      return NextResponse.json({ success: true }, { status: 200 })
+    }
+    
+    // Create headers object
+    const headersObj: Record<string, string> = {}
+    request.headers.forEach((value, key) => {
+      headersObj[key] = value
+    })
+    
+    // Add raw body for signature verification
+    headersObj['x-raw-body'] = rawBody
     
     const result = await webhookHandler.processWebhook(
       'line',
       body,
-      headers
+      headersObj
     )
     
     if (!result.success) {
