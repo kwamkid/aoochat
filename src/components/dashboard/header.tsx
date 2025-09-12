@@ -92,7 +92,7 @@ interface HeaderProps {
       full_name?: string
       avatar_url?: string
     }
-  }
+  } | null
 }
 
 export function Header({ user }: HeaderProps) {

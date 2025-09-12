@@ -1,337 +1,105 @@
 // src/app/(dashboard)/conversations/page.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { ConversationList } from "@/components/conversations/conversation-list"
 import { ChatView } from "@/components/conversations/chat-view"
 import { CustomerInfo } from "@/components/conversations/customer-info"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
-import { ChevronLeft, ChevronRight, MessageCircle } from "lucide-react"
+import { ChevronLeft, ChevronRight, MessageCircle, Loader2 } from "lucide-react"
 import type { Conversation, Message } from "@/types/conversation.types"
-
-// Mock data - ในอนาคตจะดึงจาก Supabase
-const mockConversations: Conversation[] = [
-  {
-    id: "1",
-    customer: {
-      id: "c1",
-      name: "สมชาย ใจดี",
-      email: "somchai@example.com",
-      phone: "0812345678",
-      avatar_url: undefined,
-      platform_identities: {
-        facebook: { id: "fb123", username: "somchai.jaidee" }
-      },
-      tags: ["vip", "repeat_buyer"],
-      last_contact_at: new Date().toISOString(),
-      total_conversations: 5,
-      total_spent: 15000,
-      engagement_score: 85,
-      created_at: "2024-01-01T00:00:00Z"
-    },
-    platform: "facebook",
-    subject: "สอบถามสินค้า iPhone 15 Pro",
-    status: "open",
-    priority: "high",
-    channel_type: "direct_message",
-    assigned_to: {
-      id: "a1",
-      name: "Agent Smith",
-      avatar_url: undefined
-    },
-    last_message: {
-      id: "m1",
-      conversation_id: "1",
-      sender_type: "customer",
-      sender_id: "c1",
-      sender_name: "สมชาย ใจดี",
-      message_type: "text",
-      content: { text: "สินค้ายังมีในสต็อกไหมครับ?" },
-      is_private: false,
-      is_automated: false,
-      status: "delivered",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    },
-    last_message_at: new Date().toISOString(),
-    message_count: 12,
-    unread_count: 3,
-    tags: ["product_inquiry", "iphone"],
-    is_archived: false,
-    created_at: "2024-01-01T00:00:00Z",
-    updated_at: new Date().toISOString()
-  },
-  {
-    id: "2",
-    customer: {
-      id: "c2",
-      name: "สมหญิง รักสวย",
-      email: "somying@example.com",
-      avatar_url: undefined,
-      platform_identities: {
-        line: { id: "U456", displayName: "Somying" }
-      },
-      tags: ["new_customer"],
-      last_contact_at: new Date(Date.now() - 3600000).toISOString(),
-      total_conversations: 1,
-      total_spent: 0,
-      engagement_score: 60,
-      created_at: "2024-01-15T00:00:00Z"
-    },
-    platform: "line",
-    subject: "ขอข้อมูลการจัดส่ง",
-    status: "new",
-    priority: "normal",
-    channel_type: "direct_message",
-    last_message: {
-      id: "m2",
-      conversation_id: "2",
-      sender_type: "customer",
-      sender_id: "c2",
-      sender_name: "สมหญิง รักสวย",
-      message_type: "text",
-      content: { text: "จัดส่งฟรีไหมคะ?" },
-      is_private: false,
-      is_automated: false,
-      status: "delivered",
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-      updated_at: new Date(Date.now() - 3600000).toISOString()
-    },
-    last_message_at: new Date(Date.now() - 3600000).toISOString(),
-    message_count: 3,
-    unread_count: 1,
-    tags: ["shipping_inquiry"],
-    is_archived: false,
-    created_at: "2024-01-15T00:00:00Z",
-    updated_at: new Date(Date.now() - 3600000).toISOString()
-  },
-  {
-    id: "3",
-    customer: {
-      id: "c3",
-      name: "วิชัย ขยันทำงาน",
-      phone: "0898765432",
-      avatar_url: undefined,
-      platform_identities: {
-        instagram: { id: "ig789", username: "wichai_work" }
-      },
-      tags: ["prospect"],
-      last_contact_at: new Date(Date.now() - 86400000).toISOString(),
-      total_conversations: 2,
-      total_spent: 5000,
-      engagement_score: 70,
-      created_at: "2024-01-10T00:00:00Z"
-    },
-    platform: "instagram",
-    subject: "ติดตามคำสั่งซื้อ #12345",
-    status: "pending",
-    priority: "normal",
-    channel_type: "direct_message",
-    last_message: {
-      id: "m3",
-      conversation_id: "3",
-      sender_type: "agent",
-      sender_id: "a1",
-      sender_name: "Agent Smith",
-      message_type: "text",
-      content: { text: "เรียนคุณวิชัย สินค้าของคุณอยู่ระหว่างการจัดส่งค่ะ" },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      updated_at: new Date(Date.now() - 86400000).toISOString()
-    },
-    last_message_at: new Date(Date.now() - 86400000).toISOString(),
-    message_count: 8,
-    unread_count: 0,
-    tags: ["order_tracking"],
-    is_archived: false,
-    created_at: "2024-01-10T00:00:00Z",
-    updated_at: new Date(Date.now() - 86400000).toISOString()
-  }
-]
-
-const mockMessages: Record<string, Message[]> = {
-  "1": [
-    {
-      id: "msg1",
-      conversation_id: "1",
-      sender_type: "customer",
-      sender_id: "c1",
-      sender_name: "สมชาย ใจดี",
-      message_type: "text",
-      content: { text: "สวัสดีครับ อยากสอบถามเรื่อง iPhone 15 Pro ครับ" },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 7200000).toISOString(),
-      updated_at: new Date(Date.now() - 7200000).toISOString()
-    },
-    {
-      id: "msg2",
-      conversation_id: "1",
-      sender_type: "agent",
-      sender_id: "a1",
-      sender_name: "Agent Smith",
-      message_type: "text",
-      content: { text: "สวัสดีค่ะ คุณสมชาย ยินดีให้บริการค่ะ สนใจรุ่นไหนคะ?" },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 7000000).toISOString(),
-      updated_at: new Date(Date.now() - 7000000).toISOString()
-    },
-    {
-      id: "msg3",
-      conversation_id: "1",
-      sender_type: "customer",
-      sender_id: "c1",
-      sender_name: "สมชาย ใจดี",
-      message_type: "text",
-      content: { text: "สนใจรุ่น Pro Max สีดำ 256GB ครับ" },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 6800000).toISOString(),
-      updated_at: new Date(Date.now() - 6800000).toISOString()
-    },
-    {
-      id: "msg4",
-      conversation_id: "1",
-      sender_type: "agent",
-      sender_id: "a1",
-      sender_name: "Agent Smith",
-      message_type: "image",
-      content: { 
-        media_url: "https://via.placeholder.com/300x200",
-        text: "นี่คือรูปสินค้าค่ะ"
-      },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 6600000).toISOString(),
-      updated_at: new Date(Date.now() - 6600000).toISOString()
-    },
-    {
-      id: "msg5",
-      conversation_id: "1",
-      sender_type: "system",
-      sender_id: "system",
-      sender_name: "System",
-      message_type: "text",
-      content: { text: "📌 ลูกค้าถูกแท็กเป็น VIP" },
-      is_private: true,
-      is_automated: true,
-      status: "read",
-      created_at: new Date(Date.now() - 6400000).toISOString(),
-      updated_at: new Date(Date.now() - 6400000).toISOString()
-    },
-    {
-      id: "msg6",
-      conversation_id: "1",
-      sender_type: "customer",
-      sender_id: "c1",
-      sender_name: "สมชาย ใจดี",
-      message_type: "text",
-      content: { text: "สินค้ายังมีในสต็อกไหมครับ?" },
-      is_private: false,
-      is_automated: false,
-      status: "delivered",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }
-  ],
-  "2": [
-    {
-      id: "msg7",
-      conversation_id: "2",
-      sender_type: "customer",
-      sender_id: "c2",
-      sender_name: "สมหญิง รักสวย",
-      message_type: "text",
-      content: { text: "สวัสดีค่ะ" },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 4000000).toISOString(),
-      updated_at: new Date(Date.now() - 4000000).toISOString()
-    },
-    {
-      id: "msg8",
-      conversation_id: "2",
-      sender_type: "bot",
-      sender_id: "bot",
-      sender_name: "AooBot",
-      message_type: "text",
-      content: { 
-        text: "สวัสดีค่ะ ยินดีต้อนรับสู่ AooShop ค่ะ มีอะไรให้ช่วยไหมคะ?",
-        quick_replies: [
-          { title: "ดูสินค้า", payload: "view_products" },
-          { title: "ติดต่อพนักงาน", payload: "contact_agent" },
-          { title: "ตรวจสอบคำสั่งซื้อ", payload: "check_order" }
-        ]
-      },
-      is_private: false,
-      is_automated: true,
-      status: "read",
-      created_at: new Date(Date.now() - 3900000).toISOString(),
-      updated_at: new Date(Date.now() - 3900000).toISOString()
-    },
-    {
-      id: "msg9",
-      conversation_id: "2",
-      sender_type: "customer",
-      sender_id: "c2",
-      sender_name: "สมหญิง รักสวย",
-      message_type: "text",
-      content: { text: "จัดส่งฟรีไหมคะ?" },
-      is_private: false,
-      is_automated: false,
-      status: "delivered",
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-      updated_at: new Date(Date.now() - 3600000).toISOString()
-    }
-  ],
-  "3": [
-    {
-      id: "msg10",
-      conversation_id: "3",
-      sender_type: "customer",
-      sender_id: "c3",
-      sender_name: "วิชัย ขยันทำงาน",
-      message_type: "text",
-      content: { text: "ขอเช็คสถานะคำสั่งซื้อ #12345 หน่อยครับ" },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 100000000).toISOString(),
-      updated_at: new Date(Date.now() - 100000000).toISOString()
-    },
-    {
-      id: "msg11",
-      conversation_id: "3",
-      sender_type: "agent",
-      sender_id: "a1",
-      sender_name: "Agent Smith",
-      message_type: "text",
-      content: { text: "เรียนคุณวิชัย สินค้าของคุณอยู่ระหว่างการจัดส่งค่ะ" },
-      is_private: false,
-      is_automated: false,
-      status: "read",
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      updated_at: new Date(Date.now() - 86400000).toISOString()
-    }
-  ]
-}
+import { conversationPollingService } from "@/services/conversations/conversation-polling-service"
+import { useConversationPolling } from "@/hooks/use-conversation-polling"
+import { useMessagePolling } from "@/hooks/use-message-polling"
+import { toast } from "sonner"
 
 export default function ConversationsPage() {
-  const [conversations, setConversations] = useState<Conversation[]>(mockConversations)
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
-  const [messages, setMessages] = useState<Message[]>([])
   const [showCustomerInfo, setShowCustomerInfo] = useState(false)
   const [isMobileView, setIsMobileView] = useState(false)
   const [showMobileChat, setShowMobileChat] = useState(false)
+  const [sendingMessage, setSendingMessage] = useState(false)
+
+  // Helper function to play notification sound
+  const playNotificationSound = useCallback(() => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+      
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+      
+      oscillator.frequency.value = 800
+      oscillator.type = 'sine'
+      gainNode.gain.value = 0.1
+      
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.1)
+    } catch (e) {
+      console.log('Could not play sound:', e)
+    }
+  }, [])
+
+  // Use conversation polling hook
+  const {
+    conversations,
+    loading: conversationsLoading,
+    updateConversation,
+    moveToTop
+  } = useConversationPolling({
+    onNewConversation: (conversation) => {
+      toast.success('New conversation!', {
+        description: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
+        duration: 5000,
+        action: {
+          label: 'View',
+          onClick: () => setSelectedConversation(conversation)
+        }
+      })
+      playNotificationSound()
+      
+      // Browser notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('New conversation!', {
+          body: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
+          icon: '/icon.png'
+        })
+      }
+    },
+    onNewMessage: (conversation) => {
+      // Only notify if not the current conversation
+      if (conversation.id !== selectedConversation?.id) {
+        toast.info('New message!', {
+          description: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
+          duration: 4000,
+          action: {
+            label: 'View',
+            onClick: () => setSelectedConversation(conversation)
+          }
+        })
+        playNotificationSound()
+      }
+    }
+  })
+
+  // Use message polling hook
+  const {
+    messages,
+    loading: messagesLoading,
+    addMessage,
+    replaceMessage
+  } = useMessagePolling({
+    conversationId: selectedConversation?.id || null,
+    onNewMessage: (message) => {
+      // Play sound for new customer messages
+      if (message.sender_type === 'customer') {
+        playNotificationSound()
+      }
+    },
+    enabled: !!selectedConversation
+  })
 
   // Check if mobile view
   useEffect(() => {
@@ -343,64 +111,78 @@ export default function ConversationsPage() {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Load messages when conversation selected
+  // Request notification permission on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [])
+
+  // Handle conversation selection
   useEffect(() => {
     if (selectedConversation) {
-      setMessages(mockMessages[selectedConversation.id] || [])
+      // Mark as read
+      conversationPollingService.markAsRead(selectedConversation.id)
+      
       if (isMobileView) {
         setShowMobileChat(true)
       }
     }
   }, [selectedConversation, isMobileView])
 
-  const handleSendMessage = (content: string) => {
-    if (!selectedConversation) return
+  const handleSendMessage = async (content: string) => {
+    if (!selectedConversation || !content.trim()) return
 
-    const newMessage: Message = {
-      id: `msg${Date.now()}`,
-      conversation_id: selectedConversation.id,
-      sender_type: "agent",
-      sender_id: "a1",
-      sender_name: "Agent Smith",
-      message_type: "text",
-      content: { text: content },
-      is_private: false,
-      is_automated: false,
-      status: "sent",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    try {
+      setSendingMessage(true)
+      
+      // Add optimistic message
+      const optimisticMessage: Message = {
+        id: `temp-${Date.now()}`,
+        conversation_id: selectedConversation.id,
+        sender_type: "agent",
+        sender_id: "current_user",
+        sender_name: "You",
+        message_type: "text",
+        content: { text: content },
+        is_private: false,
+        is_automated: false,
+        status: "sending",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      
+      addMessage(optimisticMessage)
+      
+      // Send actual message
+      const sentMessage = await conversationPollingService.sendMessage(
+        selectedConversation.id,
+        content
+      )
+      
+      if (sentMessage) {
+        // Replace optimistic message with real one
+        replaceMessage(optimisticMessage.id, sentMessage)
+        
+        // Update conversation's last message
+        updateConversation(selectedConversation.id, {
+          last_message: sentMessage,
+          last_message_at: sentMessage.created_at,
+          message_count: selectedConversation.message_count + 1
+        })
+        
+        // Move to top
+        moveToTop(selectedConversation.id)
+      } else {
+        // Remove optimistic message on error
+        toast.error('Failed to send message')
+      }
+    } catch (error) {
+      console.error('Error sending message:', error)
+      toast.error('Failed to send message')
+    } finally {
+      setSendingMessage(false)
     }
-
-    setMessages(prev => [...prev, newMessage])
-
-    // Update conversation's last message
-    setConversations(prev => prev.map(conv => 
-      conv.id === selectedConversation.id
-        ? { 
-            ...conv, 
-            last_message: newMessage,
-            last_message_at: newMessage.created_at,
-            message_count: conv.message_count + 1
-          }
-        : conv
-    ))
-
-    // Simulate message status update
-    setTimeout(() => {
-      setMessages(prev => prev.map(msg => 
-        msg.id === newMessage.id
-          ? { ...msg, status: "delivered" as const }
-          : msg
-      ))
-    }, 1000)
-
-    setTimeout(() => {
-      setMessages(prev => prev.map(msg => 
-        msg.id === newMessage.id
-          ? { ...msg, status: "read" as const }
-          : msg
-      ))
-    }, 2000)
   }
 
   // Mobile view - show either list or chat
@@ -415,14 +197,20 @@ export default function ConversationsPage() {
               exit={{ x: -100 }}
               className="flex-1"
             >
-              <ConversationList
-                conversations={conversations}
-                selectedId={selectedConversation?.id}
-                onSelect={(conv) => {
-                  setSelectedConversation(conv)
-                  setShowMobileChat(true)
-                }}
-              />
+              {conversationsLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+                </div>
+              ) : (
+                <ConversationList
+                  conversations={conversations}
+                  selectedId={selectedConversation?.id}
+                  onSelect={(conv) => {
+                    setSelectedConversation(conv)
+                    setShowMobileChat(true)
+                  }}
+                />
+              )}
             </motion.div>
           ) : (
             <motion.div
@@ -443,12 +231,18 @@ export default function ConversationsPage() {
                 <span className="font-medium">กลับ</span>
               </div>
               
-              <ChatView
-                conversation={selectedConversation}
-                messages={messages}
-                onSendMessage={handleSendMessage}
-                typing={false}
-              />
+              {messagesLoading ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+                </div>
+              ) : (
+                <ChatView
+                  conversation={selectedConversation}
+                  messages={messages}
+                  onSendMessage={handleSendMessage}
+                  typing={sendingMessage}
+                />
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -461,21 +255,41 @@ export default function ConversationsPage() {
     <div className="h-screen -mt-16 pt-16 flex bg-background">
       {/* Conversation List - Left Panel */}
       <div className="w-96 border-r flex-shrink-0 bg-card">
-        <ConversationList
-          conversations={conversations}
-          selectedId={selectedConversation?.id}
-          onSelect={setSelectedConversation}
-        />
+        {conversationsLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+          </div>
+        ) : conversations.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+            <MessageCircle className="w-16 h-16 text-muted-foreground/30 mb-4" />
+            <h3 className="text-lg font-medium mb-2">ยังไม่มีการสนทนา</h3>
+            <p className="text-sm text-muted-foreground">
+              เมื่อมีลูกค้าส่งข้อความมา การสนทนาจะแสดงที่นี่
+            </p>
+          </div>
+        ) : (
+          <ConversationList
+            conversations={conversations}
+            selectedId={selectedConversation?.id}
+            onSelect={setSelectedConversation}
+          />
+        )}
       </div>
 
       {/* Chat View - Center Panel */}
       <div className="flex-1 flex bg-background">
-        <ChatView
-          conversation={selectedConversation}
-          messages={messages}
-          onSendMessage={handleSendMessage}
-          typing={false}
-        />
+        {messagesLoading && selectedConversation ? (
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+          </div>
+        ) : (
+          <ChatView
+            conversation={selectedConversation}
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            typing={sendingMessage}
+          />
+        )}
       </div>
 
       {/* Customer Info - Right Panel */}
