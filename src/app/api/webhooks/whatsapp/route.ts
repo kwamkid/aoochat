@@ -11,16 +11,11 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     
-    // Extract parameters without modifying the original object
-    const mode = searchParams.get('hub.mode')
-    const token = searchParams.get('hub.verify_token')
-    const challenge = searchParams.get('hub.challenge')
-    
-    // Create new params object for verification
+    // Create new params object (don't modify original)
     const verifyParams = {
-      'hub.mode': mode,
-      'hub.verify_token': token,
-      'hub.challenge': challenge
+      'hub.mode': searchParams.get('hub.mode'),
+      'hub.verify_token': searchParams.get('hub.verify_token'),
+      'hub.challenge': searchParams.get('hub.challenge')
     }
     
     const verifiedChallenge = await webhookHandler.verifyChallenge(
@@ -63,7 +58,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true }, { status: 200 })
     }
     
-    // Create headers object without mutation
+    // Create new headers object (don't modify original)
     const headersObj: Record<string, string> = {}
     request.headers.forEach((value, key) => {
       headersObj[key] = value

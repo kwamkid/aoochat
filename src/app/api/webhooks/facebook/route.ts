@@ -12,23 +12,18 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     
-    // Extract parameters without modifying the original object
-    const mode = searchParams.get('hub.mode')
-    const token = searchParams.get('hub.verify_token')
-    const challenge = searchParams.get('hub.challenge')
+    // Create new params object (don't modify original)
+    const verifyParams = {
+      'hub.mode': searchParams.get('hub.mode'),
+      'hub.verify_token': searchParams.get('hub.verify_token'),
+      'hub.challenge': searchParams.get('hub.challenge')
+    }
     
     console.log('Facebook webhook verification:', {
-      mode,
-      token: token ? 'provided' : 'missing',
-      challenge: challenge ? 'provided' : 'missing'
+      mode: verifyParams['hub.mode'],
+      token: verifyParams['hub.verify_token'] ? 'provided' : 'missing',
+      challenge: verifyParams['hub.challenge'] ? 'provided' : 'missing'
     })
-    
-    // Create new params object for verification
-    const verifyParams = {
-      'hub.mode': mode,
-      'hub.verify_token': token,
-      'hub.challenge': challenge
-    }
     
     const verifiedChallenge = await webhookHandler.verifyChallenge(
       'facebook',
@@ -94,7 +89,7 @@ export async function POST(request: NextRequest) {
       console.warn('⚠️ No signature or app secret - skipping verification')
     }
     
-    // Create headers object without mutation
+    // Create new headers object (don't modify original)
     const headersObj: Record<string, string> = {}
     request.headers.forEach((value, key) => {
       headersObj[key] = value

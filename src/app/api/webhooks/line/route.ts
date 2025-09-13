@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true }, { status: 200 })
     }
     
-    // Create headers object without mutation
+    // Create new headers object (don't modify original)
     const headersObj: Record<string, string> = {}
     request.headers.forEach((value, key) => {
       headersObj[key] = value

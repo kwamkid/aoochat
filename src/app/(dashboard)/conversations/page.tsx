@@ -1,7 +1,7 @@
 // src/app/(dashboard)/conversations/page.tsx
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { ConversationList } from "@/components/conversations/conversation-list"
 import { ChatView } from "@/components/conversations/chat-view"
 import { CustomerInfo } from "@/components/conversations/customer-info"
@@ -12,10 +12,8 @@ import type { Conversation, Message } from "@/types/conversation.types"
 import { conversationPollingService } from "@/services/conversations/conversation-polling-service"
 import { useConversationPolling } from "@/hooks/use-conversation-polling"
 import { useMessagePolling } from "@/hooks/use-message-polling"
-import { useFacebookPlatform } from "@/hooks/use-facebook-platform"
 import { safeExecute } from "@/lib/debug-params"
 
-// Remove any params or searchParams - this is a client component
 export default function ConversationsPage() {
   console.log('[ConversationsPage] Rendering')
   
@@ -25,9 +23,6 @@ export default function ConversationsPage() {
   const [isMobileView, setIsMobileView] = useState(false)
   const [showMobileChat, setShowMobileChat] = useState(false)
   const [sendingMessage, setSendingMessage] = useState(false)
-
-  // Use Facebook platform hook
-  const { sendTextMessage } = useFacebookPlatform()
 
   // Helper function to play notification sound
   const playNotificationSound = useCallback(() => {
@@ -69,7 +64,7 @@ export default function ConversationsPage() {
           try {
             new Notification('New conversation!', {
               body: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
-              icon: '/icon.png'
+              icon: '/favicon.ico'
             })
           } catch (e) {
             console.log('Could not show notification:', e)
@@ -92,8 +87,11 @@ export default function ConversationsPage() {
   const {
     messages,
     loading: messagesLoading,
+    loadingMore: messagesLoadingMore,
+    hasMore: hasMoreMessages,
     addMessage,
-    replaceMessage
+    replaceMessage,
+    loadMoreMessages
   } = useMessagePolling({
     conversationId: selectedConversation?.id || null,
     onNewMessage: (message) => {
@@ -106,6 +104,12 @@ export default function ConversationsPage() {
     },
     enabled: !!selectedConversation
   })
+
+  // Handle scroll for loading more messages
+  const handleScroll = useCallback(() => {
+    // This is called from ChatView's onScroll
+    // The scroll position management is handled in ChatView
+  }, [])
 
   // Check if mobile view
   useEffect(() => {
@@ -167,69 +171,33 @@ export default function ConversationsPage() {
         
         addMessage(optimisticMessage)
         
-        // Check if it's Facebook platform
-        if (selectedConversation.platform === 'facebook') {
-          try {
-            // Send via Facebook API
-            const result = await sendTextMessage(selectedConversation.id, content)
-            
-            // DON'T add the message here - wait for it to come from webhook/polling
-            // Just update the conversation metadata
-            updateConversation(selectedConversation.id, {
-              last_message_at: new Date().toISOString(),
-              message_count: selectedConversation.message_count + 1
-            })
-            
-            // Move to top
-            moveToTop(selectedConversation.id)
-            
-            // Remove the optimistic message when real one arrives
-            // For now, just mark it as sent
-            const updatedMessage = { ...optimisticMessage, status: 'sent' as const }
-            replaceMessage(optimisticMessage.id, updatedMessage)
-            
-            console.log('Message sent successfully via Facebook')
-            
-          } catch (error) {
-            console.error('Error sending Facebook message:', error)
-            
-            // Update optimistic message to failed
-            const failedMessage = { ...optimisticMessage, status: 'failed' as const }
-            replaceMessage(optimisticMessage.id, failedMessage)
-            
-            // Show error in console instead of toast
-            console.error('ส่งข้อความไม่สำเร็จ - กรุณาลองใหม่อีกครั้ง')
-          }
-        } else {
-          // For other platforms, send normally
-          const sentMessage = await conversationPollingService.sendMessage(
-            selectedConversation.id,
-            content
-          )
+        // Send message normally for all platforms
+        const sentMessage = await conversationPollingService.sendMessage(
+          selectedConversation.id,
+          content
+        )
+        
+        if (sentMessage) {
+          // Replace optimistic message with real one
+          replaceMessage(optimisticMessage.id, sentMessage)
           
-          if (sentMessage) {
-            // Replace optimistic message with real one
-            replaceMessage(optimisticMessage.id, sentMessage)
-            
-            // Update conversation's last message
-            updateConversation(selectedConversation.id, {
-              last_message: sentMessage,
-              last_message_at: sentMessage.created_at,
-              message_count: selectedConversation.message_count + 1
-            })
-            
-            // Move to top
-            moveToTop(selectedConversation.id)
-          } else {
-            // Update optimistic message to failed
-            const failedMessage = { ...optimisticMessage, status: 'failed' as const }
-            replaceMessage(optimisticMessage.id, failedMessage)
-            console.error('Failed to send message')
-          }
+          // Update conversation's last message
+          updateConversation(selectedConversation.id, {
+            last_message: sentMessage,
+            last_message_at: sentMessage.created_at,
+            message_count: selectedConversation.message_count + 1
+          })
+          
+          // Move to top
+          moveToTop(selectedConversation.id)
+        } else {
+          // Update optimistic message to failed
+          const failedMessage = { ...optimisticMessage, status: 'failed' as const }
+          replaceMessage(optimisticMessage.id, failedMessage)
+          console.error('Failed to send message')
         }
       } catch (error) {
         console.error('Error sending message:', error)
-        // Show error in console instead of toast
         console.error('Failed to send message - check console for details')
       } finally {
         setSendingMessage(false)
@@ -294,7 +262,11 @@ export default function ConversationsPage() {
                   conversation={selectedConversation}
                   messages={messages}
                   onSendMessage={handleSendMessage}
+                  onLoadMore={loadMoreMessages}
+                  loading={messagesLoadingMore}
+                  hasMore={hasMoreMessages}
                   typing={sendingMessage}
+                  onScroll={handleScroll}
                 />
               )}
             </motion.div>
@@ -345,6 +317,7 @@ export default function ConversationsPage() {
             loading={messagesLoadingMore}
             hasMore={hasMoreMessages}
             typing={sendingMessage}
+            onScroll={handleScroll}
           />
         )}
       </div>

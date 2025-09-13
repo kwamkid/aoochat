@@ -3,7 +3,6 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { useFacebookPlatform } from "@/hooks/use-facebook-platform"
 import { 
   Send as SendIcon, 
   Paperclip, 
@@ -31,9 +30,7 @@ import {
   Trash2,
   Forward,
   Reply,
-  MessageCircle,
-  RefreshCw,
-  UserCheck
+  MessageCircle
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format, isToday, isYesterday } from "date-fns"
@@ -80,6 +77,7 @@ interface ChatViewProps {
   loading?: boolean
   hasMore?: boolean
   typing?: boolean
+  onScroll?: () => void
 }
 
 export function ChatView({
@@ -89,106 +87,53 @@ export function ChatView({
   onLoadMore,
   loading = false,
   hasMore = false,
-  typing = false
+  typing = false,
+  onScroll
 }: ChatViewProps) {
   const [messageInput, setMessageInput] = useState("")
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [selectedMessages, setSelectedMessages] = useState<string[]>([])
   const [isRecording, setIsRecording] = useState(false)
-  const [isLoadingProfile, setIsLoadingProfile] = useState(false)
-  const [profileData, setProfileData] = useState<any>(null)
   
+  // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageContainerRef = useRef<HTMLDivElement>(null)
+  const isLoadingMoreRef = useRef(false)
+  const previousScrollHeightRef = useRef(0)
 
-  // Use Facebook Platform hook
-  const {
-    sendTextMessage,
-    sendImageMessage,
-    sendQuickReplies,
-    getProfile,
-    syncProfile,
-    sendingMessage
-  } = useFacebookPlatform()
-
-  // Auto scroll to bottom on new messages
+  // Auto scroll to bottom only for new messages (not when loading old messages)
   useEffect(() => {
-    scrollToBottom()
-  }, [messages])
-
-  // Load Facebook profile when conversation changes
-  useEffect(() => {
-    if (conversation?.platform === 'facebook' && conversation.id) {
-      loadFacebookProfile()
+    // Don't scroll if we're loading more old messages
+    if (!isLoadingMoreRef.current) {
+      scrollToBottom()
     }
-  }, [conversation?.id])
+  }, [messages.length])
+
+  // Maintain scroll position when loading more messages
+  useEffect(() => {
+    if (isLoadingMoreRef.current && messageContainerRef.current) {
+      const scrollContainer = messageContainerRef.current
+      const newScrollHeight = scrollContainer.scrollHeight
+      const scrollDiff = newScrollHeight - previousScrollHeightRef.current
+      
+      // Maintain the scroll position by adding the height difference
+      scrollContainer.scrollTop = scrollDiff
+      
+      // Reset the flag
+      isLoadingMoreRef.current = false
+    }
+  }, [messages])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
-  // Load Facebook profile
-  const loadFacebookProfile = async () => {
-    if (!conversation) return
-    
-    setIsLoadingProfile(true)
-    try {
-      const profile = await getProfile(undefined, conversation.id)
-      if (profile) {
-        setProfileData(profile)
-        console.log('โหลดข้อมูลโปรไฟล์สำเร็จ:', profile)
-      }
-    } catch (error) {
-      console.error('Error loading profile:', error)
-    } finally {
-      setIsLoadingProfile(false)
-    }
-  }
-
-  // Refresh Facebook profile
-  const refreshProfile = async () => {
-    if (!conversation?.customer?.id) return
-    
-    setIsLoadingProfile(true)
-    try {
-      const profile = await syncProfile(conversation.customer.id)
-      if (profile) {
-        setProfileData(profile)
-        console.log('อัพเดทโปรไฟล์สำเร็จ:', profile)
-      }
-    } catch (error) {
-      console.error('อัพเดทโปรไฟล์ไม่สำเร็จ:', error)
-    } finally {
-      setIsLoadingProfile(false)
-    }
-  }
-
   const handleSend = async () => {
     if (messageInput.trim() && conversation) {
-      // Check if it's Facebook platform
-      if (conversation.platform === 'facebook') {
-        try {
-          // Send via Facebook API
-          await sendTextMessage(conversation.id, messageInput.trim())
-          
-          // Clear input immediately for better UX
-          setMessageInput("")
-          
-          // DON'T call onSendMessage here - it's already handled in conversations/page.tsx
-          // The message will be added through the optimistic update in handleSendMessage
-          
-          console.log('ส่งข้อความสำเร็จ')
-        } catch (error) {
-          console.error('ส่งข้อความไม่สำเร็จ:', error)
-          console.error('Error sending Facebook message:', error)
-        }
-      } else {
-        // For other platforms, use the original method
-        onSendMessage(messageInput.trim())
-        setMessageInput("")
-      }
+      onSendMessage(messageInput.trim())
+      setMessageInput("")
     }
   }
 
@@ -267,18 +212,11 @@ export function ChatView({
               {conversation.customer.tags.includes('vip') && (
                 <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
               )}
-              {profileData && (
-                <span className="text-xs text-muted-foreground">
-                  ({profileData.name})
-                </span>
-              )}
             </h3>
             <p className="text-sm text-muted-foreground">
-              {typing || sendingMessage ? (
+              {typing ? (
                 <span className="flex items-center gap-1">
-                  <span className="animate-pulse">
-                    {sendingMessage ? 'กำลังส่ง...' : 'กำลังพิมพ์'}
-                  </span>
+                  <span className="animate-pulse">กำลังพิมพ์</span>
                   <span className="flex gap-1">
                     <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                     <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -293,30 +231,6 @@ export function ChatView({
         </div>
         
         <div className="flex items-center gap-2">
-          {conversation.platform === 'facebook' && (
-            <>
-              <button 
-                onClick={loadFacebookProfile}
-                disabled={isLoadingProfile}
-                className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
-                title="โหลดโปรไฟล์"
-              >
-                {isLoadingProfile ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
-                ) : (
-                  <UserCheck className="w-5 h-5" />
-                )}
-              </button>
-              <button 
-                onClick={refreshProfile}
-                disabled={isLoadingProfile || !conversation.customer.id}
-                className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
-                title="รีเฟรชโปรไฟล์"
-              >
-                <RefreshCw className="w-5 h-5" />
-              </button>
-            </>
-          )}
           <button className="p-2 hover:bg-muted rounded-lg transition-colors">
             <Phone className="w-5 h-5" />
           </button>
@@ -336,7 +250,21 @@ export function ChatView({
       <div 
         ref={messageContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4"
-        onScroll={handleScroll}
+        onScroll={() => {
+          if (messageContainerRef.current && !isLoadingMoreRef.current) {
+            const { scrollTop } = messageContainerRef.current
+            
+            // Load more when scrolled near the top
+            if (scrollTop < 100 && hasMore && !loading && onLoadMore) {
+              isLoadingMoreRef.current = true
+              previousScrollHeightRef.current = messageContainerRef.current.scrollHeight
+              onLoadMore()
+            }
+          }
+          
+          // Call parent onScroll if provided
+          if (onScroll) onScroll()
+        }}
       >
         {/* Load More Button/Indicator */}
         {hasMore && (
@@ -348,7 +276,14 @@ export function ChatView({
               </div>
             ) : (
               <button
-                onClick={onLoadMore}
+                onClick={() => {
+                  if (onLoadMore && messageContainerRef.current) {
+                    // Set flag and store current scroll height before loading
+                    isLoadingMoreRef.current = true
+                    previousScrollHeightRef.current = messageContainerRef.current.scrollHeight
+                    onLoadMore()
+                  }
+                }}
                 className="text-sm text-brand-600 dark:text-brand-400 hover:underline"
               >
                 โหลดข้อความเก่า
@@ -500,7 +435,7 @@ export function ChatView({
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="พิมพ์ข้อความ..."
-              disabled={sendingMessage}
+              disabled={typing}
               className="w-full h-11 px-4 py-2.5 pr-12 bg-muted/50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all overflow-hidden disabled:opacity-50"
               style={{ lineHeight: '1.5' }}
               rows={1}
@@ -518,8 +453,8 @@ export function ChatView({
             {messageInput.trim() ? (
               <button
                 onClick={handleSend}
-                disabled={false}
-                className="h-11 w-11 flex items-center justify-center bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
+                disabled={typing}
+                className="h-11 w-11 flex items-center justify-center bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50"
               >
                 <SendIcon className="w-5 h-5" />
               </button>
