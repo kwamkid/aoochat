@@ -1,7 +1,7 @@
 // src/app/(dashboard)/conversations/page.tsx
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { ConversationList } from "@/components/conversations/conversation-list"
 import { ChatView } from "@/components/conversations/chat-view"
 import { CustomerInfo } from "@/components/conversations/customer-info"
@@ -12,17 +12,41 @@ import type { Conversation, Message } from "@/types/conversation.types"
 import { conversationPollingService } from "@/services/conversations/conversation-polling-service"
 import { useConversationPolling } from "@/hooks/use-conversation-polling"
 import { useMessagePolling } from "@/hooks/use-message-polling"
+import { useMessageService } from "@/hooks/use-message-service"
+import { useConversationScroll } from "@/lib/conversation-manager"
 import { safeExecute } from "@/lib/debug-params"
+import { toast } from "sonner"
 
 export default function ConversationsPage() {
   console.log('[ConversationsPage] Rendering')
   
-  // All state management
+  // State management
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [showCustomerInfo, setShowCustomerInfo] = useState(false)
   const [isMobileView, setIsMobileView] = useState(false)
   const [showMobileChat, setShowMobileChat] = useState(false)
-  const [sendingMessage, setSendingMessage] = useState(false)
+
+  // Scroll management
+  const {
+    containerRef,
+    scrollToBottom,
+    scrollToMessage,
+    isNearBottom,
+    handleScroll: handleScrollEvent,
+    maintainScrollPosition
+  } = useConversationScroll({
+    autoScrollToBottom: true,
+    scrollThreshold: 100,
+    smoothScroll: true
+  })
+
+  // Platform service for selected conversation
+  const {
+    sending,
+    sendMessage,
+    markAsRead,
+    deleteMessage
+  } = useMessageService(selectedConversation)
 
   // Helper function to play notification sound
   const playNotificationSound = useCallback(() => {
@@ -99,6 +123,11 @@ export default function ConversationsPage() {
         // Play sound for new customer messages
         if (message.sender_type === 'customer') {
           playNotificationSound()
+          
+          // Auto scroll to bottom if near bottom
+          if (isNearBottom()) {
+            setTimeout(() => scrollToBottom(), 100)
+          }
         }
       }, 'useMessagePolling onNewMessage')
     },
@@ -107,9 +136,16 @@ export default function ConversationsPage() {
 
   // Handle scroll for loading more messages
   const handleScroll = useCallback(() => {
-    // This is called from ChatView's onScroll
-    // The scroll position management is handled in ChatView
-  }, [])
+    handleScrollEvent()
+    
+    // Load more when scrolled to top
+    const container = containerRef.current
+    if (container && container.scrollTop < 100 && hasMoreMessages && !messagesLoadingMore) {
+      maintainScrollPosition(async () => {
+        await loadMoreMessages()
+      })
+    }
+  }, [handleScrollEvent, hasMoreMessages, messagesLoadingMore, loadMoreMessages, maintainScrollPosition])
 
   // Check if mobile view
   useEffect(() => {
@@ -142,65 +178,80 @@ export default function ConversationsPage() {
         if (isMobileView) {
           setShowMobileChat(true)
         }
+        
+        // Scroll to bottom when conversation changes
+        setTimeout(() => scrollToBottom(true), 100)
       }, 'Handle conversation selection')
     }
-  }, [selectedConversation, isMobileView])
+  }, [selectedConversation, isMobileView, scrollToBottom])
 
+  // Scroll to bottom when messages load
+  useEffect(() => {
+    if (messages.length > 0 && !messagesLoadingMore) {
+      // Only auto-scroll if user is near bottom
+      if (isNearBottom()) {
+        scrollToBottom()
+      }
+    }
+  }, [messages.length, messagesLoadingMore, isNearBottom, scrollToBottom])
+
+  // Handle send message with platform service
   const handleSendMessage = async (content: string) => {
     if (!selectedConversation || !content.trim()) return
 
     await safeExecute(async () => {
-      try {
-        setSendingMessage(true)
+      // Check if platform is supported
+      if (!isPlatformSupported) {
+        toast.error(`Platform ${selectedConversation.platform} is not supported yet`)
+        return
+      }
+
+      // Add optimistic message
+      const optimisticMessage: Message = {
+        id: `temp-${Date.now()}`,
+        conversation_id: selectedConversation.id,
+        sender_type: "agent",
+        sender_id: "current_user",
+        sender_name: "You",
+        message_type: "text",
+        content: { text: content },
+        is_private: false,
+        is_automated: false,
+        status: "sending",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      
+      addMessage(optimisticMessage)
+      
+      // Send typing indicator
+      await sendTypingIndicator(true)
+      
+      // Send message through platform service
+      const sentMessage = await sendPlatformMessage(content, 'text')
+      
+      // Turn off typing indicator
+      await sendTypingIndicator(false)
+      
+      if (sentMessage) {
+        // Replace optimistic message with real one
+        replaceMessage(optimisticMessage.id, sentMessage)
         
-        // Add optimistic message
-        const optimisticMessage: Message = {
-          id: `temp-${Date.now()}`,
-          conversation_id: selectedConversation.id,
-          sender_type: "agent",
-          sender_id: "current_user",
-          sender_name: "You",
-          message_type: "text",
-          content: { text: content },
-          is_private: false,
-          is_automated: false,
-          status: "sending",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
+        // Update conversation's last message
+        updateConversation(selectedConversation.id, {
+          last_message: sentMessage,
+          last_message_at: sentMessage.created_at,
+          message_count: selectedConversation.message_count + 1
+        })
         
-        addMessage(optimisticMessage)
-        
-        // Send message normally for all platforms
-        const sentMessage = await conversationPollingService.sendMessage(
-          selectedConversation.id,
-          content
-        )
-        
-        if (sentMessage) {
-          // Replace optimistic message with real one
-          replaceMessage(optimisticMessage.id, sentMessage)
-          
-          // Update conversation's last message
-          updateConversation(selectedConversation.id, {
-            last_message: sentMessage,
-            last_message_at: sentMessage.created_at,
-            message_count: selectedConversation.message_count + 1
-          })
-          
-          // Move to top
-          moveToTop(selectedConversation.id)
-        } else {
-          // Update optimistic message to failed
-          const failedMessage = { ...optimisticMessage, status: 'failed' as const }
+        // Move to top
+        moveToTop(selectedConversation.id)
+      } else {
+        // Update optimistic message to failed if not already updated
+        if (!optimisticMessage.error_message) {
+          const failedMessage = { ...optimisticMessage, status: 'failed' as const, error_message: 'Failed to send message' }
           replaceMessage(optimisticMessage.id, failedMessage)
-          console.error('Failed to send message')
         }
-      } catch (error) {
-        console.error('Error sending message:', error)
-        console.error('Failed to send message - check console for details')
-      } finally {
-        setSendingMessage(false)
       }
     }, 'handleSendMessage')
   }
@@ -259,6 +310,7 @@ export default function ConversationsPage() {
                 </div>
               ) : (
                 <ChatView
+                  ref={containerRef}
                   conversation={selectedConversation}
                   messages={messages}
                   onSendMessage={handleSendMessage}
@@ -267,6 +319,10 @@ export default function ConversationsPage() {
                   hasMore={hasMoreMessages}
                   typing={sendingMessage}
                   onScroll={handleScroll}
+                  platformFeatures={{
+                    supportsQuickReplies,
+                    supportsCarousel
+                  }}
                 />
               )}
             </motion.div>
@@ -310,6 +366,7 @@ export default function ConversationsPage() {
           </div>
         ) : (
           <ChatView
+            ref={containerRef}
             conversation={selectedConversation}
             messages={messages}
             onSendMessage={handleSendMessage}
@@ -318,6 +375,10 @@ export default function ConversationsPage() {
             hasMore={hasMoreMessages}
             typing={sendingMessage}
             onScroll={handleScroll}
+            platformFeatures={{
+              supportsQuickReplies,
+              supportsCarousel
+            }}
           />
         )}
       </div>

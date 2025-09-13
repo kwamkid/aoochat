@@ -1,7 +1,7 @@
 // src/components/conversations/chat-view.tsx
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
   Send as SendIcon, 
@@ -30,7 +30,8 @@ import {
   Trash2,
   Forward,
   Reply,
-  MessageCircle
+  MessageCircle,
+  ArrowDown
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format, isToday, isYesterday } from "date-fns"
@@ -78,9 +79,13 @@ interface ChatViewProps {
   hasMore?: boolean
   typing?: boolean
   onScroll?: () => void
+  platformFeatures?: {
+    supportsQuickReplies?: boolean
+    supportsCarousel?: boolean
+  }
 }
 
-export function ChatView({
+export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   conversation,
   messages,
   onSendMessage,
@@ -88,13 +93,15 @@ export function ChatView({
   loading = false,
   hasMore = false,
   typing = false,
-  onScroll
-}: ChatViewProps) {
+  onScroll,
+  platformFeatures
+}, ref) => {
   const [messageInput, setMessageInput] = useState("")
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [selectedMessages, setSelectedMessages] = useState<string[]>([])
   const [isRecording, setIsRecording] = useState(false)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -103,18 +110,21 @@ export function ChatView({
   const isLoadingMoreRef = useRef(false)
   const previousScrollHeightRef = useRef(0)
 
+  // Use provided ref or local ref
+  const containerRef = ref || messageContainerRef
+
   // Auto scroll to bottom only for new messages (not when loading old messages)
   useEffect(() => {
     // Don't scroll if we're loading more old messages
-    if (!isLoadingMoreRef.current) {
+    if (!isLoadingMoreRef.current && messages.length > 0) {
       scrollToBottom()
     }
   }, [messages.length])
 
   // Maintain scroll position when loading more messages
   useEffect(() => {
-    if (isLoadingMoreRef.current && messageContainerRef.current) {
-      const scrollContainer = messageContainerRef.current
+    if (isLoadingMoreRef.current && containerRef && 'current' in containerRef && containerRef.current) {
+      const scrollContainer = containerRef.current
       const newScrollHeight = scrollContainer.scrollHeight
       const scrollDiff = newScrollHeight - previousScrollHeightRef.current
       
@@ -124,10 +134,29 @@ export function ChatView({
       // Reset the flag
       isLoadingMoreRef.current = false
     }
-  }, [messages])
+  }, [messages, containerRef])
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  // Check if near bottom for scroll to bottom button
+  useEffect(() => {
+    const checkScrollPosition = () => {
+      if (containerRef && 'current' in containerRef && containerRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = containerRef.current
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+        setShowScrollToBottom(distanceFromBottom > 200)
+      }
+    }
+
+    const container = containerRef && 'current' in containerRef ? containerRef.current : null
+    if (container) {
+      container.addEventListener('scroll', checkScrollPosition)
+      return () => container.removeEventListener('scroll', checkScrollPosition)
+    }
+  }, [containerRef])
+
+  const scrollToBottom = (force = false) => {
+    messagesEndRef.current?.scrollIntoView({ 
+      behavior: force ? "auto" : "smooth" 
+    })
   }
 
   const handleSend = async () => {
@@ -187,7 +216,7 @@ export function ChatView({
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full">
+    <div className="flex-1 flex flex-col h-full relative">
       {/* Chat Header */}
       <div className="px-6 py-4 border-b bg-card flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -231,6 +260,9 @@ export function ChatView({
         </div>
         
         <div className="flex items-center gap-2">
+          <div className="text-xs px-2 py-1 bg-muted rounded-full">
+            {conversation.platform}
+          </div>
           <button className="p-2 hover:bg-muted rounded-lg transition-colors">
             <Phone className="w-5 h-5" />
           </button>
@@ -248,16 +280,16 @@ export function ChatView({
 
       {/* Messages Container */}
       <div 
-        ref={messageContainerRef}
+        ref={containerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4"
         onScroll={() => {
-          if (messageContainerRef.current && !isLoadingMoreRef.current) {
-            const { scrollTop } = messageContainerRef.current
+          if (containerRef && 'current' in containerRef && containerRef.current && !isLoadingMoreRef.current) {
+            const { scrollTop } = containerRef.current
             
             // Load more when scrolled near the top
             if (scrollTop < 100 && hasMore && !loading && onLoadMore) {
               isLoadingMoreRef.current = true
-              previousScrollHeightRef.current = messageContainerRef.current.scrollHeight
+              previousScrollHeightRef.current = containerRef.current.scrollHeight
               onLoadMore()
             }
           }
@@ -277,10 +309,9 @@ export function ChatView({
             ) : (
               <button
                 onClick={() => {
-                  if (onLoadMore && messageContainerRef.current) {
-                    // Set flag and store current scroll height before loading
+                  if (onLoadMore && containerRef && 'current' in containerRef && containerRef.current) {
                     isLoadingMoreRef.current = true
-                    previousScrollHeightRef.current = messageContainerRef.current.scrollHeight
+                    previousScrollHeightRef.current = containerRef.current.scrollHeight
                     onLoadMore()
                   }
                 }}
@@ -346,6 +377,21 @@ export function ChatView({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Scroll to Bottom Button */}
+      <AnimatePresence>
+        {showScrollToBottom && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            onClick={() => scrollToBottom(true)}
+            className="absolute bottom-24 right-6 w-10 h-10 bg-card border rounded-full shadow-lg flex items-center justify-center hover:bg-muted transition-colors"
+          >
+            <ArrowDown className="w-5 h-5" />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Selected Messages Actions */}
       <AnimatePresence>
@@ -478,17 +524,26 @@ export function ChatView({
           </div>
         </div>
         
-        {/* Quick Replies */}
+        {/* Quick Replies / Platform Features */}
         <div className="flex gap-2 mt-2 overflow-x-auto scrollbar-hide">
-          {['สวัสดีครับ', 'รอสักครู่นะครับ', 'ขอบคุณครับ', 'ยินดีให้บริการครับ'].map((reply) => (
-            <button
-              key={reply}
-              onClick={() => setMessageInput(reply)}
-              className="px-3 py-1 text-sm bg-muted hover:bg-muted/80 rounded-full whitespace-nowrap transition-colors"
-            >
-              {reply}
-            </button>
-          ))}
+          {platformFeatures?.supportsQuickReplies && (
+            <>
+              {['สวัสดีครับ', 'รอสักครู่นะครับ', 'ขอบคุณครับ', 'ยินดีให้บริการครับ'].map((reply) => (
+                <button
+                  key={reply}
+                  onClick={() => setMessageInput(reply)}
+                  className="px-3 py-1 text-sm bg-muted hover:bg-muted/80 rounded-full whitespace-nowrap transition-colors"
+                >
+                  {reply}
+                </button>
+              ))}
+            </>
+          )}
+          {!platformFeatures?.supportsQuickReplies && (
+            <span className="text-xs text-muted-foreground py-1">
+              Platform: {conversation.platform}
+            </span>
+          )}
         </div>
       </div>
       
@@ -502,7 +557,9 @@ export function ChatView({
       />
     </div>
   )
-}
+})
+
+ChatView.displayName = 'ChatView'
 
 // Message Bubble Component
 function MessageBubble({
@@ -565,6 +622,7 @@ function MessageBubble({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
+      data-message-id={message.id}
       className={cn(
         "flex gap-2 group",
         isOwn ? "justify-end" : "justify-start",

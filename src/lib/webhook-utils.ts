@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server'
 
 /**
  * Safely extract headers from NextRequest
- * Avoids mutation of read-only objects in Next.js 15
+ * Compatible with Next.js 15 read-only restrictions
  */
 export function extractHeaders(request: NextRequest): Record<string, string> {
   const headers: Record<string, string> = {}
@@ -19,7 +19,7 @@ export function extractHeaders(request: NextRequest): Record<string, string> {
 
 /**
  * Safely extract search params from NextRequest
- * Avoids mutation of read-only objects in Next.js 15
+ * Compatible with Next.js 15 read-only restrictions
  */
 export function extractSearchParams(request: NextRequest): Record<string, string | null> {
   const params: Record<string, string | null> = {}
@@ -69,6 +69,7 @@ export async function parseWebhookBody(request: NextRequest): Promise<{
 
 /**
  * Create webhook verification params
+ * Compatible with Next.js 15
  */
 export function createVerificationParams(searchParams: URLSearchParams): Record<string, string | null> {
   return {
@@ -76,4 +77,18 @@ export function createVerificationParams(searchParams: URLSearchParams): Record<
     'hub.verify_token': searchParams.get('hub.verify_token'),
     'hub.challenge': searchParams.get('hub.challenge')
   }
+}
+
+/**
+ * Create headers object with raw body
+ * Compatible with Next.js 15
+ */
+export function createHeadersWithRawBody(
+  request: NextRequest, 
+  rawBody: string
+): Record<string, string> {
+  const headers = extractHeaders(request)
+  // Add raw body for signature verification
+  headers['x-raw-body'] = rawBody
+  return headers
 }

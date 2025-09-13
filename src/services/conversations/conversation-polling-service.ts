@@ -9,9 +9,16 @@ export class ConversationPollingService {
   private lastConversationId: string | null = null
 
   constructor() {
-    // Initialize last check time
-    this.lastCheckTime = localStorage.getItem('lastCheckTime') || new Date().toISOString()
-    this.lastConversationId = localStorage.getItem('lastConversationId')
+    // Check if we're on the client side before using localStorage
+    if (typeof window !== 'undefined') {
+      // Initialize last check time
+      this.lastCheckTime = localStorage.getItem('lastCheckTime') || new Date().toISOString()
+      this.lastConversationId = localStorage.getItem('lastConversationId')
+    } else {
+      // Server-side: use default values
+      this.lastCheckTime = new Date().toISOString()
+      this.lastConversationId = null
+    }
   }
 
   /**
@@ -29,15 +36,17 @@ export class ConversationPollingService {
       const latestConv = conversations[0]
       const hasNewActivity = this.checkForNewActivity(latestConv)
       
-      // Update tracking
-      if (latestConv.last_message_at) {
-        this.lastCheckTime = latestConv.last_message_at
-        localStorage.setItem('lastCheckTime', this.lastCheckTime)
-      }
-      
-      if (latestConv.id !== this.lastConversationId) {
-        this.lastConversationId = latestConv.id
-        localStorage.setItem('lastConversationId', latestConv.id)
+      // Update tracking (only on client side)
+      if (typeof window !== 'undefined') {
+        if (latestConv.last_message_at) {
+          this.lastCheckTime = latestConv.last_message_at
+          localStorage.setItem('lastCheckTime', this.lastCheckTime)
+        }
+        
+        if (latestConv.id !== this.lastConversationId) {
+          this.lastConversationId = latestConv.id
+          localStorage.setItem('lastConversationId', latestConv.id)
+        }
       }
       
       return { conversations, hasNewActivity, latestConversation: latestConv }
@@ -173,41 +182,52 @@ export class ConversationPollingService {
   /**
    * Get messages with pagination support
    * Returns messages in chronological order (oldest to newest)
+   * @param conversationId - ID of the conversation
+   * @param limit - Number of messages to fetch (default 30)
+   * @param offset - Number of messages to skip (default 0)
    */
   async getMessagesPaginated(conversationId: string, limit = 30, offset = 0) {
     try {
-      console.log(`Getting paginated messages: limit=${limit}, offset=${offset}`)
+      console.log(`[Service] Getting paginated messages: conversationId=${conversationId}, limit=${limit}, offset=${offset}`)
       
-      // First, get total count
-      const { count } = await this.supabase
-        .from('messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('conversation_id', conversationId)
+      // Method 1: Get latest messages when offset is 0
+      if (offset === 0) {
+        // Get the most recent messages
+        const { data, error } = await this.supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: false })
+          .limit(limit)
+        
+        if (error) {
+          console.error('Error fetching initial messages:', error)
+          return []
+        }
+        
+        // Reverse to get chronological order (oldest to newest)
+        const messages = (data || []).reverse().map(msg => this.transformMessage(msg))
+        console.log(`[Service] Fetched ${messages.length} initial messages`)
+        
+        return messages
+      }
       
-      const totalMessages = count || 0
-      console.log(`Total messages in conversation: ${totalMessages}`)
-      
-      // Calculate the actual offset from the end
-      // We want to get the newest messages first
-      const startIndex = Math.max(0, totalMessages - offset - limit)
-      const endIndex = totalMessages - offset - 1
-      
-      console.log(`Fetching messages from index ${startIndex} to ${endIndex}`)
-      
+      // Method 2: Get older messages with offset
       const { data, error } = await this.supabase
         .from('messages')
         .select('*')
         .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true })
-        .range(startIndex, endIndex)
-
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1)
+      
       if (error) {
         console.error('Error fetching paginated messages:', error)
         return []
       }
-
-      const messages = (data || []).map(msg => this.transformMessage(msg))
-      console.log(`Fetched ${messages.length} messages`)
+      
+      // Reverse to get chronological order
+      const messages = (data || []).reverse().map(msg => this.transformMessage(msg))
+      console.log(`[Service] Fetched ${messages.length} messages from offset ${offset}`)
       
       return messages
     } catch (error) {
