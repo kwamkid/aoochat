@@ -40,10 +40,11 @@ export default function ConversationsPage() {
     smoothScroll: true
   })
 
-  // Platform service for selected conversation
+  // Message service for selected conversation
   const {
     sending,
     sendMessage,
+    sendTypingIndicator,
     markAsRead,
     deleteMessage
   } = useMessageService(selectedConversation)
@@ -145,7 +146,7 @@ export default function ConversationsPage() {
         await loadMoreMessages()
       })
     }
-  }, [handleScrollEvent, hasMoreMessages, messagesLoadingMore, loadMoreMessages, maintainScrollPosition])
+  }, [handleScrollEvent, hasMoreMessages, messagesLoadingMore, loadMoreMessages, maintainScrollPosition, containerRef])
 
   // Check if mobile view
   useEffect(() => {
@@ -173,7 +174,7 @@ export default function ConversationsPage() {
     if (selectedConversation) {
       safeExecute(() => {
         // Mark as read
-        conversationPollingService.markAsRead(selectedConversation.id).catch(console.error)
+        markAsRead()
         
         if (isMobileView) {
           setShowMobileChat(true)
@@ -183,7 +184,7 @@ export default function ConversationsPage() {
         setTimeout(() => scrollToBottom(true), 100)
       }, 'Handle conversation selection')
     }
-  }, [selectedConversation, isMobileView, scrollToBottom])
+  }, [selectedConversation, isMobileView, scrollToBottom, markAsRead])
 
   // Scroll to bottom when messages load
   useEffect(() => {
@@ -195,17 +196,11 @@ export default function ConversationsPage() {
     }
   }, [messages.length, messagesLoadingMore, isNearBottom, scrollToBottom])
 
-  // Handle send message with platform service
+  // Handle send message with message service
   const handleSendMessage = async (content: string) => {
     if (!selectedConversation || !content.trim()) return
 
     await safeExecute(async () => {
-      // Check if platform is supported
-      if (!isPlatformSupported) {
-        toast.error(`Platform ${selectedConversation.platform} is not supported yet`)
-        return
-      }
-
       // Add optimistic message
       const optimisticMessage: Message = {
         id: `temp-${Date.now()}`,
@@ -224,14 +219,8 @@ export default function ConversationsPage() {
       
       addMessage(optimisticMessage)
       
-      // Send typing indicator
-      await sendTypingIndicator(true)
-      
-      // Send message through platform service
-      const sentMessage = await sendPlatformMessage(content, 'text')
-      
-      // Turn off typing indicator
-      await sendTypingIndicator(false)
+      // Send message through message service
+      const sentMessage = await sendMessage(content, 'text')
       
       if (sentMessage) {
         // Replace optimistic message with real one
@@ -247,11 +236,9 @@ export default function ConversationsPage() {
         // Move to top
         moveToTop(selectedConversation.id)
       } else {
-        // Update optimistic message to failed if not already updated
-        if (!optimisticMessage.error_message) {
-          const failedMessage = { ...optimisticMessage, status: 'failed' as const, error_message: 'Failed to send message' }
-          replaceMessage(optimisticMessage.id, failedMessage)
-        }
+        // Update optimistic message to failed
+        const failedMessage = { ...optimisticMessage, status: 'failed' as const, error_message: 'Failed to send message' }
+        replaceMessage(optimisticMessage.id, failedMessage)
       }
     }, 'handleSendMessage')
   }
@@ -317,12 +304,8 @@ export default function ConversationsPage() {
                   onLoadMore={loadMoreMessages}
                   loading={messagesLoadingMore}
                   hasMore={hasMoreMessages}
-                  typing={sendingMessage}
+                  typing={sending}
                   onScroll={handleScroll}
-                  platformFeatures={{
-                    supportsQuickReplies,
-                    supportsCarousel
-                  }}
                 />
               )}
             </motion.div>
@@ -373,12 +356,8 @@ export default function ConversationsPage() {
             onLoadMore={loadMoreMessages}
             loading={messagesLoadingMore}
             hasMore={hasMoreMessages}
-            typing={sendingMessage}
+            typing={sending}
             onScroll={handleScroll}
-            platformFeatures={{
-              supportsQuickReplies,
-              supportsCarousel
-            }}
           />
         )}
       </div>

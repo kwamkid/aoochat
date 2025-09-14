@@ -1,3 +1,4 @@
+// src/components/layout/sidebar.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -28,7 +29,12 @@ import {
   Tag,
   Megaphone,
   FileText,
-  Palette
+  Palette,
+  Plug,
+  Shield,
+  CreditCard,
+  Database,
+  Globe
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -104,10 +110,53 @@ const navigationItems = [
         badge: null
       }
     ]
+  },
+  {
+    title: "ตั้งค่า",
+    items: [
+      {
+        name: "การเชื่อมต่อ",
+        href: "/settings/platforms",
+        icon: Plug,
+        badge: "New",
+        badgeType: "success",
+        description: "จัดการ Platform integrations"
+      },
+      {
+        name: "องค์กร",
+        href: "/settings/organization",
+        icon: Building,
+        badge: null
+      },
+      {
+        name: "ความปลอดภัย",
+        href: "/settings/security",
+        icon: Shield,
+        badge: null
+      },
+      {
+        name: "การเรียกเก็บเงิน",
+        href: "/settings/billing",
+        icon: CreditCard,
+        badge: null
+      },
+      {
+        name: "API & Webhooks",
+        href: "/settings/api",
+        icon: Globe,
+        badge: null
+      },
+      {
+        name: "ตั้งค่าทั่วไป",
+        href: "/settings",
+        icon: Settings,
+        badge: null
+      }
+    ]
   }
 ]
 
-// Platform Connections
+// Platform Connections (for quick status)
 const platformConnections = [
   {
     id: "facebook",
@@ -142,8 +191,19 @@ interface SidebarProps {
 export function Sidebar({ className }: SidebarProps) {
   const pathname = usePathname()
   const [isMobileOpen, setIsMobileOpen] = useState(false)
-  const [isPlatformOpen, setIsPlatformOpen] = useState(true)
+  const [isPlatformOpen, setIsPlatformOpen] = useState(false)
   const [isTeamMenuOpen, setIsTeamMenuOpen] = useState(false)
+  const [expandedSections, setExpandedSections] = useState<string[]>(["หลัก"])
+
+  // Auto-expand section if current path is in it
+  useEffect(() => {
+    navigationItems.forEach(section => {
+      const hasActiveItem = section.items.some(item => pathname.startsWith(item.href))
+      if (hasActiveItem && !expandedSections.includes(section.title)) {
+        setExpandedSections(prev => [...prev, section.title])
+      }
+    })
+  }, [pathname])
 
   // Close mobile sidebar when route changes
   useEffect(() => {
@@ -161,6 +221,14 @@ export function Sidebar({ className }: SidebarProps) {
       document.body.style.overflow = 'unset'
     }
   }, [isMobileOpen])
+
+  const toggleSection = (sectionTitle: string) => {
+    setExpandedSections(prev => 
+      prev.includes(sectionTitle) 
+        ? prev.filter(t => t !== sectionTitle)
+        : [...prev, sectionTitle]
+    )
+  }
 
   const SidebarContent = () => (
     <>
@@ -193,7 +261,7 @@ export function Sidebar({ className }: SidebarProps) {
               <Building className="w-5 h-5 text-brand-600 dark:text-brand-400" />
             </div>
             <div className="text-left">
-              <p className="text-base font-medium">บริษัท ABC</p>
+              <p className="text-sm font-medium">บริษัท ABC</p>
               <p className="text-xs text-muted-foreground">Pro Plan</p>
             </div>
           </div>
@@ -211,10 +279,10 @@ export function Sidebar({ className }: SidebarProps) {
               exit={{ height: 0, opacity: 0 }}
               className="mt-2 space-y-1 overflow-hidden"
             >
-              <button className="w-full text-left px-3 py-2.5 text-base hover:bg-muted rounded-lg transition-colors">
+              <button className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors">
                 เปลี่ยนองค์กร
               </button>
-              <button className="w-full text-left px-3 py-2.5 text-base hover:bg-muted rounded-lg transition-colors">
+              <button className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors">
                 ตั้งค่าองค์กร
               </button>
             </motion.div>
@@ -224,55 +292,86 @@ export function Sidebar({ className }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 px-4 py-4 space-y-6 overflow-y-auto">
-        {navigationItems.map((section) => (
-          <div key={section.title}>
-            <h3 className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              {section.title}
-            </h3>
-            <div className="space-y-1">
-              {section.items.map((item) => {
-                const isActive = pathname === item.href
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center justify-between px-3 py-2.5 rounded-lg transition-all",
-                      isActive
-                        ? "bg-brand-50 dark:bg-brand-950/30 text-brand-600 dark:text-brand-400"
-                        : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                    )}
+        {navigationItems.map((section) => {
+          const isExpanded = expandedSections.includes(section.title)
+          
+          return (
+            <div key={section.title}>
+              <button
+                onClick={() => toggleSection(section.title)}
+                className="w-full flex items-center justify-between px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+              >
+                <span>{section.title}</span>
+                <ChevronRight className={cn(
+                  "w-3 h-3 transition-transform",
+                  isExpanded && "rotate-90"
+                )} />
+              </button>
+              
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="mt-2 space-y-1 overflow-hidden"
                   >
-                    <div className="flex items-center gap-3">
-                      <item.icon className="w-5 h-5" />
-                      <span className="text-base font-medium">{item.name}</span>
-                    </div>
-                    {item.badge && (
-                      <span className={cn(
-                        "px-2 py-0.5 text-xs font-medium rounded-full",
-                        item.badgeType === "error" 
-                          ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-                          : item.badgeType === "info"
-                          ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                          : "bg-muted text-muted-foreground"
-                      )}>
-                        {item.badge}
-                      </span>
-                    )}
-                  </Link>
-                )
-              })}
+                    {section.items.map((item) => {
+                      const isActive = pathname === item.href || 
+                                      (item.href !== '/settings' && pathname.startsWith(item.href))
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={cn(
+                            "flex items-center justify-between px-3 py-2 rounded-lg transition-all group",
+                            isActive
+                              ? "bg-brand-50 dark:bg-brand-950/30 text-brand-600 dark:text-brand-400"
+                              : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <item.icon className="w-4 h-4" />
+                            <div>
+                              <span className="text-sm font-medium">{item.name}</span>
+                              {item.description && (
+                                <p className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {item.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          {item.badge && (
+                            <span className={cn(
+                              "px-2 py-0.5 text-xs font-medium rounded-full",
+                              item.badgeType === "error" 
+                                ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+                                : item.badgeType === "info"
+                                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                                : item.badgeType === "success"
+                                ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400"
+                                : "bg-muted text-muted-foreground"
+                            )}>
+                              {item.badge}
+                            </span>
+                          )}
+                        </Link>
+                      )
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-          </div>
-        ))}
+          )
+        })}
 
-        {/* Platform Connections */}
+        {/* Quick Platform Status */}
         <div>
           <button
             onClick={() => setIsPlatformOpen(!isPlatformOpen)}
-            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+            className="w-full flex items-center justify-between px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
           >
-            <span>แพลตฟอร์ม</span>
+            <span>สถานะแพลตฟอร์ม</span>
             <ChevronRight className={cn(
               "w-3 h-3 transition-transform",
               isPlatformOpen && "rotate-90"
@@ -294,7 +393,7 @@ export function Sidebar({ className }: SidebarProps) {
                   >
                     <div className="flex items-center gap-3">
                       <div className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center",
+                        "w-7 h-7 rounded-lg flex items-center justify-center",
                         platform.status === "connected" 
                           ? "bg-green-100 dark:bg-green-900/30"
                           : platform.status === "pending"
@@ -304,7 +403,7 @@ export function Sidebar({ className }: SidebarProps) {
                         <PlatformIcon 
                           platform={platform.id} 
                           className={cn(
-                            "w-5 h-5",
+                            "w-4 h-4",
                             platform.status === "connected"
                               ? "text-green-600 dark:text-green-400"
                               : platform.status === "pending"
@@ -314,10 +413,10 @@ export function Sidebar({ className }: SidebarProps) {
                         />
                       </div>
                       <div>
-                        <p className="text-sm font-medium">{platform.name}</p>
+                        <p className="text-xs font-medium">{platform.name}</p>
                         <p className="text-xs text-muted-foreground">
                           {platform.status === "connected" 
-                            ? `${platform.accounts} บัญชี`
+                            ? `${platform.accounts} เพจ`
                             : platform.status === "pending"
                             ? "รอการอนุมัติ"
                             : "ยังไม่เชื่อมต่อ"
@@ -325,21 +424,19 @@ export function Sidebar({ className }: SidebarProps) {
                         </p>
                       </div>
                     </div>
-                    {platform.status === "disconnected" && (
-                      <button className="opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Plus className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-                      </button>
-                    )}
                     {platform.status === "connected" && (
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                     )}
                   </div>
                 ))}
                 
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 text-base text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 rounded-lg transition-colors">
-                  <Plus className="w-5 h-5" />
-                  เพิ่มแพลตฟอร์ม
-                </button>
+                <Link 
+                  href="/settings/platforms"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 rounded-lg transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  จัดการการเชื่อมต่อ
+                </Link>
               </motion.div>
             )}
           </AnimatePresence>
@@ -349,17 +446,10 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Bottom Section */}
       <div className="p-4 border-t space-y-2">
         <Link
-          href="/settings"
-          className="flex items-center gap-3 px-3 py-2.5 text-base text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-        >
-          <Settings className="w-5 h-5" />
-          ตั้งค่า
-        </Link>
-        <Link
           href="/help"
-          className="flex items-center gap-3 px-3 py-2.5 text-base text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+          className="flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
         >
-          <HelpCircle className="w-5 h-5" />
+          <HelpCircle className="w-4 h-4" />
           ช่วยเหลือ
         </Link>
         
