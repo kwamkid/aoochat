@@ -42,28 +42,50 @@ export default function RegisterPage() {
     setError(null)
 
     try {
-      // Sign up user
+      // Step 1: Sign up user (ไม่สร้าง org ตอนนี้)
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
           data: {
             full_name: formData.fullName,
-            organization_name: formData.organizationName,
           },
+          emailRedirectTo: `${window.location.origin}/auth/callback`
         },
       })
 
       if (authError) throw authError
 
+      // Step 2: Create user record (without organization)
+      if (authData.user) {
+        const { error: userError } = await supabase
+          .from('users')
+          .insert({
+            id: authData.user.id,
+            email: formData.email,
+            name: formData.fullName,
+            role: 'admin', // Default role in users table
+            is_active: true,
+            language: 'th',
+            timezone: 'Asia/Bangkok',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        
+        if (userError && userError.code !== '23505') { // Ignore duplicate error
+          console.error('Error creating user record:', userError)
+        }
+      }
+
       // Show success message
       setStep(3)
       
-      // Redirect after 2 seconds
+      // Redirect to organization selection page
       setTimeout(() => {
-        router.push("/dashboard")
+        router.push("/organizations") // จะสร้างหน้านี้ใหม่
       }, 2000)
     } catch (error: any) {
+      console.error('Registration error:', error)
       setError(error.message)
     } finally {
       setLoading(false)

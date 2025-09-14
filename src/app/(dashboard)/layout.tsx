@@ -1,8 +1,8 @@
 // src/app/(dashboard)/layout.tsx
 "use client"
 
-import { Sidebar } from '@/components/dashboard/sidebar'
-import { Header } from '@/components/dashboard/header'
+import { Sidebar } from '@/components/layout/sidebar'
+import { Header } from '@/components/layout/header'
 import { Toaster } from 'sonner'
 
 export default function DashboardLayout({

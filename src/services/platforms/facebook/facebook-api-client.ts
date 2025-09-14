@@ -17,9 +17,25 @@ export class FacebookAPIClient implements PlatformAPIClient {
   }
   
   /**
+   * Check if API is configured
+   */
+  private isConfigured(): boolean {
+    return !!(this.credentials.accessToken && this.credentials.accessToken !== 'undefined')
+  }
+  
+  /**
    * Send a message to Facebook user
    */
   async sendMessage(recipientId: string, message: any): Promise<any> {
+    // Check if Facebook is configured
+    if (!this.isConfigured()) {
+      console.warn('Facebook API not configured - skipping message send')
+      return { 
+        success: false, 
+        error: 'Facebook not configured. Please connect Facebook in Settings > Platforms' 
+      }
+    }
+    
     try {
       console.log('Sending Facebook message to:', recipientId)
       console.log('Message content:', message)
@@ -62,6 +78,12 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Send typing indicator
    */
   async sendTypingIndicator(recipientId: string, isTyping: boolean): Promise<void> {
+    // Check if Facebook is configured
+    if (!this.isConfigured()) {
+      console.log('Facebook not configured - skipping typing indicator')
+      return // Silently skip if not configured
+    }
+    
     try {
       const url = `${this.baseUrl}/me/messages`
       
@@ -83,10 +105,12 @@ export class FacebookAPIClient implements PlatformAPIClient {
       
       if (!response.ok) {
         const error = await response.json()
-        console.error('Failed to send typing indicator:', error)
+        console.warn('Failed to send typing indicator (non-critical):', error.error?.message || 'Unknown error')
+        // Don't throw - typing indicator is not critical
       }
     } catch (error) {
-      console.error('Error sending typing indicator:', error)
+      console.warn('Error sending typing indicator (non-critical):', error)
+      // Don't throw - typing indicator is not critical
     }
   }
   
@@ -94,6 +118,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Mark message as read
    */
   async markAsRead(messageId: string): Promise<void> {
+    if (!this.isConfigured()) {
+      return // Silently skip if not configured
+    }
+    
     try {
       const url = `${this.baseUrl}/me/messages`
       
@@ -115,10 +143,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
       
       if (!response.ok) {
         const error = await response.json()
-        console.error('Failed to mark as read:', error)
+        console.warn('Failed to mark as read (non-critical):', error.error?.message || 'Unknown error')
       }
     } catch (error) {
-      console.error('Error marking as read:', error)
+      console.warn('Error marking as read (non-critical):', error)
     }
   }
   
@@ -126,6 +154,11 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Get user profile from Facebook
    */
   async getUserProfile(userId: string): Promise<any> {
+    if (!this.isConfigured()) {
+      console.warn('Facebook not configured - cannot fetch profile')
+      return null
+    }
+    
     try {
       console.log('Fetching Facebook profile for:', userId)
       
@@ -176,6 +209,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Get page information
    */
   async getPageInfo(): Promise<any> {
+    if (!this.isConfigured()) {
+      throw new Error('Facebook not configured')
+    }
+    
     try {
       const url = `${this.baseUrl}/me?fields=id,name,picture&access_token=${this.credentials.accessToken}`
       
@@ -198,6 +235,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * For file uploads in browser environment, use uploadMediaFromUrl instead
    */
   async uploadMedia(file: any, mimeType: string): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('Facebook not configured')
+    }
+    
     // In browser environment, we can't easily handle Buffer
     // Redirect to URL-based upload
     if (typeof file === 'string') {
@@ -235,6 +276,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Upload media from URL (recommended method)
    */
   async uploadMediaFromUrl(mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'file'): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('Facebook not configured')
+    }
+    
     try {
       const url = `${this.baseUrl}/me/message_attachments`
       
@@ -285,6 +330,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Validate credentials
    */
   async validateCredentials(): Promise<boolean> {
+    if (!this.isConfigured()) {
+      return false
+    }
+    
     try {
       const url = `${this.baseUrl}/me?access_token=${this.credentials.accessToken}`
       const response = await fetch(url)
@@ -299,6 +348,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Subscribe webhook
    */
   async subscribeWebhook(callbackUrl: string): Promise<void> {
+    if (!this.credentials.appId || !this.credentials.appSecret) {
+      throw new Error('Facebook App ID and Secret required for webhook subscription')
+    }
+    
     try {
       const url = `${this.baseUrl}/${this.credentials.appId}/subscriptions`
       
@@ -330,6 +383,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Unsubscribe webhook
    */
   async unsubscribeWebhook(): Promise<void> {
+    if (!this.credentials.appId || !this.credentials.appSecret) {
+      throw new Error('Facebook App ID and Secret required')
+    }
+    
     try {
       const url = `${this.baseUrl}/${this.credentials.appId}/subscriptions`
       
@@ -358,6 +415,10 @@ export class FacebookAPIClient implements PlatformAPIClient {
    * Refresh access token (for user access tokens, not page tokens)
    */
   async refreshAccessToken(): Promise<string> {
+    if (!this.credentials.appId || !this.credentials.appSecret || !this.credentials.accessToken) {
+      throw new Error('Facebook credentials not configured')
+    }
+    
     try {
       const url = `${this.baseUrl}/oauth/access_token`
       
