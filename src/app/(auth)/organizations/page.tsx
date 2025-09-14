@@ -60,14 +60,18 @@ export default function OrganizationsPage() {
     }
   }
 
-  const selectOrganization = async (orgId: string) => {
+const selectOrganization = async (orgId: string) => {
     setSelecting(orgId)
     try {
+      console.log('Selecting organization:', orgId)
+      
       // Set as default organization
       await organizationService.setDefaultOrganization(orgId)
       
       // Store in localStorage for quick access
       localStorage.setItem("current_organization_id", orgId)
+      
+      toast.success('เลือกองค์กรสำเร็จ')
       
       // Navigate to dashboard
       router.push("/dashboard")

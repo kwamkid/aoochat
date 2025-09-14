@@ -26,13 +26,16 @@ import {
   X,
   Command,
   Building,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Loader2
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
-import { useOrganization } from "@/contexts/organization-context"
 import { createClient } from "@/lib/supabase/client"
 import type { UserOrganization } from "@/types/organization.types"
+
+// Import useOrganization - it should handle cases where context doesn't exist
+import { useOrganization } from "@/contexts/organization-context"
 
 // Notification Types
 type NotificationType = "message" | "customer" | "order" | "system"
@@ -114,8 +117,27 @@ export function Header({ user, organization }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [notifications, setNotifications] = useState(mockNotifications)
   
-  // Get organization context
-  const orgContext = typeof window !== 'undefined' ? useOrganization() : null
+  // Try to use organization context
+  let orgContext: any = {
+    currentOrganization: null,
+    currentMember: null,
+    userOrganizations: [],
+    loading: false,
+    switching: false,
+    switchOrganization: async () => {},
+    refreshOrganizations: async () => {},
+    refreshCurrentOrganization: async () => {},
+    hasPermission: () => true,
+    user: null
+  }
+  
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    orgContext = useOrganization()
+  } catch (error) {
+    // Context not available, use default values
+  }
+  
   const { userOrganizations, switchOrganization, switching } = orgContext || {}
   
   // Refs for click outside
@@ -226,6 +248,13 @@ export function Header({ user, organization }: HeaderProps) {
     router.push("/login")
   }
 
+  const handleSwitchOrganization = async (org: UserOrganization) => {
+    if (switchOrganization && org.organization_id !== organization?.id) {
+      await switchOrganization(org.organization_id)
+      setIsOrgSwitcherOpen(false)
+    }
+  }
+
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 px-4 md:px-6">
       {/* Search Section */}
@@ -254,15 +283,10 @@ export function Header({ user, organization }: HeaderProps) {
                     <p className="px-3 py-1 text-xs font-semibold text-muted-foreground">
                       เปลี่ยนองค์กร
                     </p>
-                    {userOrganizations.map((org) => (
+                    {userOrganizations.map((org: UserOrganization) => (
                       <button
                         key={org.organization_id}
-                        onClick={() => {
-                          if (switchOrganization) {
-                            switchOrganization(org.organization_id)
-                            setIsOrgSwitcherOpen(false)
-                          }
-                        }}
+                        onClick={() => handleSwitchOrganization(org)}
                         disabled={switching || org.organization_id === organization.id}
                         className={cn(
                           "w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center justify-between",
@@ -277,6 +301,9 @@ export function Header({ user, organization }: HeaderProps) {
                         </div>
                         {org.organization_id === organization.id && (
                           <Check className="w-4 h-4" />
+                        )}
+                        {switching && org.organization_id !== organization.id && (
+                          <Loader2 className="w-4 h-4 animate-spin" />
                         )}
                       </button>
                     ))}

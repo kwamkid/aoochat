@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { organizationService } from "@/services/organizations/organization.service"
-import { Mail, Lock, User, Building, Loader2, MessageCircle, CheckCircle, Gift } from "lucide-react"
+import { Mail, Lock, User, Building, Loader2, MessageCircle, CheckCircle, Gift, AlertCircle } from "lucide-react"
 import { motion } from "framer-motion"
 import { AnimatedBackground } from "@/components/auth/animated-background"
 import { toast } from "sonner"
@@ -27,6 +27,8 @@ export default function RegisterPage() {
     organizationName: "",
   })
   const [loading, setLoading] = useState(false)
+  const [checkingEmail, setCheckingEmail] = useState(false)
+  const [emailError, setEmailError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState(1)
   const [hasInvitation, setHasInvitation] = useState(false)
@@ -67,11 +69,83 @@ export default function RegisterPage() {
       ...formData,
       [e.target.name]: e.target.value,
     })
+    
+    // Clear email error when user types
+    if (e.target.name === 'email') {
+      setEmailError(null)
+    }
+  }
+
+  // Check if email already exists
+  const checkEmailExists = async (email: string): Promise<boolean> => {
+    try {
+      // Check in users table only
+      const { data: existingUser, error } = await supabase
+        .from('users')
+        .select('email')
+        .eq('email', email)
+        .maybeSingle() // Use maybeSingle instead of single to avoid error when no data
+      
+      // If we found a user with this email, it exists
+      if (existingUser) {
+        return true
+      }
+      
+      return false
+    } catch (error) {
+      console.error('Error checking email:', error)
+      // If there's an error, assume email doesn't exist to allow registration
+      return false
+    }
+  }
+
+  // Validate email when moving to step 2
+  const handleNextStep = async () => {
+    // Validate step 1 fields
+    if (!formData.fullName.trim()) {
+      setError("กรุณากรอกชื่อ-นามสกุล")
+      return
+    }
+    
+    if (!hasInvitation && !formData.organizationName.trim()) {
+      setError("กรุณากรอกชื่อองค์กร")
+      return
+    }
+    
+    setError(null)
+    setStep(2)
+  }
+
+  // Validate email before registration
+  const validateEmail = async (): Promise<boolean> => {
+    setCheckingEmail(true)
+    setEmailError(null)
+    
+    try {
+      // Check email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      if (!emailRegex.test(formData.email)) {
+        setEmailError("รูปแบบอีเมลไม่ถูกต้อง")
+        return false
+      }
+      
+      // Check if email already exists
+      const emailExists = await checkEmailExists(formData.email)
+      if (emailExists) {
+        setEmailError("อีเมลนี้ถูกใช้งานแล้ว กรุณาใช้อีเมลอื่นหรือเข้าสู่ระบบ")
+        return false
+      }
+      
+      return true
+    } finally {
+      setCheckingEmail(false)
+    }
   }
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
     
+    // Validate passwords
     if (formData.password !== formData.confirmPassword) {
       setError("รหัสผ่านไม่ตรงกัน")
       return
@@ -82,11 +156,17 @@ export default function RegisterPage() {
       return
     }
 
+    // Validate email first
+    const isEmailValid = await validateEmail()
+    if (!isEmailValid) {
+      return
+    }
+
     setLoading(true)
     setError(null)
 
     try {
-      // Step 1: Sign up user
+      // Sign up new user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -98,9 +178,16 @@ export default function RegisterPage() {
         },
       })
 
-      if (authError) throw authError
+      if (authError) {
+        // Handle specific auth errors
+        if (authError.message === 'User already registered') {
+          setEmailError("อีเมลนี้ถูกใช้งานแล้ว กรุณาใช้อีเมลอื่นหรือเข้าสู่ระบบ")
+          return
+        }
+        throw authError
+      }
 
-      // Step 2: Create user record
+      // Create user record
       if (authData.user) {
         const { error: userError } = await supabase
           .from('users')
@@ -120,7 +207,7 @@ export default function RegisterPage() {
           console.error('Error creating user record:', userError)
         }
 
-        // Step 3: Handle invitation or create organization
+        // Handle invitation or create organization
         if (hasInvitation && invitationToken) {
           // Accept invitation
           try {
@@ -128,18 +215,50 @@ export default function RegisterPage() {
             toast.success("เข้าร่วมองค์กรสำเร็จ!")
           } catch (error) {
             console.error('Error accepting invitation:', error)
-            toast.error("ไม่สามารถเข้าร่วมองค์กรได้")
+            toast.warning("ไม่สามารถเข้าร่วมองค์กรได้ กรุณาลองใหม่ภายหลัง")
           }
         } else if (formData.organizationName) {
           // Create new organization
           try {
+            // First, ensure the user is properly signed in
+            const { data: { session } } = await supabase.auth.getSession()
+            
+            if (!session) {
+              // If no session, try to sign in the user
+              await supabase.auth.signInWithPassword({
+                email: formData.email,
+                password: formData.password,
+              })
+            }
+            
+            // Now create the organization
             await organizationService.createOrganization({
               name: formData.organizationName,
             })
             toast.success("สร้างองค์กรสำเร็จ!")
-          } catch (error) {
+          } catch (error: any) {
             console.error('Error creating organization:', error)
-            toast.error("ไม่สามารถสร้างองค์กรได้")
+            
+            // More specific error handling
+            if (error.message?.includes('User not authenticated')) {
+              // Try to sign in and create org again
+              try {
+                await supabase.auth.signInWithPassword({
+                  email: formData.email,
+                  password: formData.password,
+                })
+                
+                await organizationService.createOrganization({
+                  name: formData.organizationName,
+                })
+                toast.success("สร้างองค์กรสำเร็จ!")
+              } catch (retryError) {
+                console.error('Retry failed:', retryError)
+                toast.warning("สร้างองค์กรไม่สำเร็จ กรุณาสร้างในหน้าถัดไป")
+              }
+            } else {
+              toast.warning("สร้างองค์กรไม่สำเร็จ กรุณาสร้างในหน้าถัดไป")
+            }
           }
         }
       }
@@ -153,7 +272,17 @@ export default function RegisterPage() {
       }, 2000)
     } catch (error: any) {
       console.error('Registration error:', error)
-      setError(error.message)
+      
+      // Handle specific error messages
+      if (error.message?.includes('Password should be at least')) {
+        setError('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
+      } else if (error.message?.includes('Invalid email')) {
+        setError('รูปแบบอีเมลไม่ถูกต้อง')
+      } else if (error.message?.includes('Email rate limit exceeded')) {
+        setError('ส่งอีเมลบ่อยเกินไป กรุณารอสักครู่')
+      } else {
+        setError(error.message || 'เกิดข้อผิดพลาดในการสมัครสมาชิก')
+      }
     } finally {
       setLoading(false)
     }
@@ -289,9 +418,10 @@ export default function RegisterPage() {
                 <motion.div
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm"
+                  className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm flex items-start gap-2"
                 >
-                  {error}
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>{error}</span>
                 </motion.div>
               )}
 
@@ -299,7 +429,7 @@ export default function RegisterPage() {
                 <>
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      ชื่อ-นามสกุล
+                      ชื่อ-นามสกุล <span className="text-red-500">*</span>
                     </label>
                     <div className="relative group">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-brand-500 transition-colors" />
@@ -318,7 +448,7 @@ export default function RegisterPage() {
                   {!hasInvitation && (
                     <div>
                       <label className="block text-sm font-medium mb-2">
-                        ชื่อองค์กร/บริษัท
+                        ชื่อองค์กร/บริษัท <span className="text-red-500">*</span>
                       </label>
                       <div className="relative group">
                         <Building className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-brand-500 transition-colors" />
@@ -337,7 +467,7 @@ export default function RegisterPage() {
 
                   <motion.button
                     type="button"
-                    onClick={() => setStep(2)}
+                    onClick={handleNextStep}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     className="w-full py-3 px-4 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-lg sm:rounded-xl font-medium hover:from-brand-600 hover:to-brand-700 transition-all shadow-lg"
@@ -351,7 +481,7 @@ export default function RegisterPage() {
                 <>
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      อีเมล
+                      อีเมล <span className="text-red-500">*</span>
                     </label>
                     <div className="relative group">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-brand-500 transition-colors" />
@@ -360,17 +490,35 @@ export default function RegisterPage() {
                         name="email"
                         value={formData.email}
                         onChange={handleChange}
-                        className="w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+                        onBlur={() => {
+                          if (formData.email) {
+                            validateEmail()
+                          }
+                        }}
+                        className={`w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all ${
+                          emailError ? 'border-red-500 focus:ring-red-500' : ''
+                        }`}
                         placeholder="you@example.com"
                         required
                         disabled={hasInvitation}
                       />
+                      {checkingEmail && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                        </div>
+                      )}
                     </div>
+                    {emailError && (
+                      <p className="text-xs text-red-500 mt-1 flex items-start gap-1">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                        {emailError}
+                      </p>
+                    )}
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      รหัสผ่าน
+                      รหัสผ่าน <span className="text-red-500">*</span>
                     </label>
                     <div className="relative group">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-brand-500 transition-colors" />
@@ -382,13 +530,17 @@ export default function RegisterPage() {
                         className="w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
                         placeholder="••••••••"
                         required
+                        minLength={6}
                       />
                     </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      อย่างน้อย 6 ตัวอักษร
+                    </p>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      ยืนยันรหัสผ่าน
+                      ยืนยันรหัสผ่าน <span className="text-red-500">*</span>
                     </label>
                     <div className="relative group">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-brand-500 transition-colors" />
@@ -414,7 +566,7 @@ export default function RegisterPage() {
                     </button>
                     <motion.button
                       type="submit"
-                      disabled={loading}
+                      disabled={loading || checkingEmail || !!emailError}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       className="flex-1 py-3 px-4 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-lg sm:rounded-xl font-medium hover:from-brand-600 hover:to-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
@@ -438,7 +590,7 @@ export default function RegisterPage() {
                 มีบัญชีแล้ว?{" "}
               </span>
               <Link
-                href="/login"
+                href={invitationToken ? `/login?invitation=${invitationToken}` : "/login"}
                 className="text-sm font-medium text-brand-500 hover:text-brand-600 transition-colors"
               >
                 เข้าสู่ระบบ

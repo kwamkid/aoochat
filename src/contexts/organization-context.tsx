@@ -5,7 +5,14 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { organizationService } from '@/services/organizations/organization.service'
-import type { Organization, OrganizationMember, UserOrganization } from '@/types/organization.types'
+import type { 
+  Organization, 
+  OrganizationMember, 
+  UserOrganization,
+  OrganizationRole,
+  OrganizationPermissions
+} from '@/types/organization.types'
+import { DEFAULT_PERMISSIONS } from '@/types/organization.types'
 import { toast } from 'sonner'
 
 interface OrganizationContextType {
@@ -166,12 +173,18 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       
       toast.success('เปลี่ยนองค์กรสำเร็จ')
       
-      // Refresh the page to reload all data with new organization context
-      window.location.href = '/dashboard'
+      // Check current path - don't redirect if we're on organizations page
+      const currentPath = window.location.pathname
+      if (currentPath === '/organizations') {
+        // Stay on organizations page
+        setSwitching(false)
+      } else {
+        // Refresh the page to reload all data with new organization context
+        window.location.href = '/dashboard'
+      }
     } catch (error) {
       console.error('Error switching organization:', error)
       toast.error('Failed to switch organization')
-    } finally {
       setSwitching(false)
     }
   }

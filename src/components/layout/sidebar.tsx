@@ -1,7 +1,7 @@
 // src/components/layout/sidebar.tsx
 "use client"
 
-import { useState, useEffect, useContext } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -38,15 +38,7 @@ import {
   UserPlus
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-// Import context separately to handle cases where it might not exist
-let OrganizationContext: any
-try {
-  const contextModule = require("@/contexts/organization-context")
-  OrganizationContext = contextModule.OrganizationContext
-} catch {
-  // Context doesn't exist yet
-}
+import { useOrganization } from "@/contexts/organization-context"
 
 // Platform Icons Component
 const PlatformIcon = ({ platform, className }: { platform: string; className?: string }) => {
@@ -236,20 +228,49 @@ export function Sidebar({ className, organization }: SidebarProps) {
   const [isPlatformOpen, setIsPlatformOpen] = useState(false)
   const [isOrgMenuOpen, setIsOrgMenuOpen] = useState(false)
   const [expandedSections, setExpandedSections] = useState<string[]>(["หลัก"])
+  const [mounted, setMounted] = useState(false)
   
-  // Try to use context if available, otherwise use default
-  const orgContext = OrganizationContext ? useContext(OrganizationContext) : null
+  // Create a safe wrapper for the organization context
+  function useSafeOrganization() {
+    try {
+      return useOrganization()
+    } catch {
+      // Return default values if context is not available
+      return {
+        currentOrganization: null,
+        currentMember: null,
+        userOrganizations: [],
+        loading: false,
+        switching: false,
+        switchOrganization: async () => {},
+        refreshOrganizations: async () => {},
+        refreshCurrentOrganization: async () => {},
+        hasPermission: () => true,
+        user: null
+      }
+    }
+  }
+  
+  // Always call the hook at the top level
+  const orgContext = useSafeOrganization()
   const hasPermission = orgContext?.hasPermission || (() => true)
+
+  // Check if mounted to avoid SSR issues
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Auto-expand section if current path is in it
   useEffect(() => {
+    if (!mounted) return
+    
     navigationItems.forEach(section => {
       const hasActiveItem = section.items.some(item => pathname.startsWith(item.href))
       if (hasActiveItem && !expandedSections.includes(section.title)) {
         setExpandedSections(prev => [...prev, section.title])
       }
     })
-  }, [pathname])
+  }, [pathname, mounted])
 
   // Close mobile sidebar when route changes
   useEffect(() => {
@@ -537,6 +558,11 @@ export function Sidebar({ className, organization }: SidebarProps) {
       </div>
     </>
   )
+
+  // Don't render anything on server side
+  if (!mounted) {
+    return null
+  }
 
   return (
     <>

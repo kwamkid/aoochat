@@ -24,11 +24,52 @@ export class OrganizationService {
     const { data: { user } } = await this.supabase.auth.getUser()
     if (!user) throw new Error('User not authenticated')
 
-    const { data, error } = await this.supabase
+    console.log('Fetching organizations for user:', user.id)
+    
+    // First, try using the RPC function
+    const { data: rpcData, error: rpcError } = await this.supabase
       .rpc('get_user_organizations', { p_user_id: user.id })
 
-    if (error) throw error
-    return data || []
+    if (!rpcError && rpcData) {
+      console.log('Organizations from RPC:', rpcData)
+      return rpcData || []
+    }
+
+    // If RPC fails, fallback to direct query
+    console.log('RPC failed, trying direct query. Error:', rpcError)
+    
+    const { data, error } = await this.supabase
+      .from('organization_members')
+      .select(`
+        organization_id,
+        user_role: role,
+        is_default,
+        joined_at,
+        organization:organizations(
+          name,
+          slug
+        )
+      `)
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+
+    if (error) {
+      console.error('Direct query also failed:', error)
+      throw error
+    }
+
+    // Transform the data to match UserOrganization type
+    const organizations: UserOrganization[] = (data || []).map(item => ({
+      organization_id: item.organization_id,
+      organization_name: item.organization?.name || 'Unknown',
+      organization_slug: item.organization?.slug || 'unknown',
+      user_role: item.user_role || 'member',
+      is_default: item.is_default || false,
+      joined_at: item.joined_at || new Date().toISOString()
+    }))
+
+    console.log('Organizations from direct query:', organizations)
+    return organizations
   }
 
   /**
