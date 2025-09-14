@@ -1,21 +1,42 @@
+// src/app/(auth)/login/page.tsx
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { Mail, Lock, Loader2, MessageCircle, Users, Zap } from "lucide-react"
+import { Mail, Lock, Loader2, MessageCircle, Users, Zap, AlertCircle } from "lucide-react"
 import { motion } from "framer-motion"
 import { AnimatedBackground } from "@/components/auth/animated-background"
+import { toast } from "sonner"
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+  
+  // Check if there's a redirect URL or invitation
+  const redirectTo = searchParams.get('redirectTo')
+  const invitationToken = searchParams.get('invitation')
   
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [rememberMe, setRememberMe] = useState(false)
+
+  useEffect(() => {
+    // Check if user is already logged in
+    checkUser()
+  }, [])
+
+  const checkUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      // User is already logged in, redirect to organizations
+      router.push("/organizations")
+    }
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,6 +44,7 @@ export default function LoginPage() {
     setError(null)
 
     try {
+      // Attempt to sign in
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -30,13 +52,59 @@ export default function LoginPage() {
 
       if (error) throw error
 
-      router.push("/dashboard")
+      // If login successful
+      toast.success("เข้าสู่ระบบสำเร็จ!")
+
+      // Handle invitation if present
+      if (invitationToken && data.user) {
+        try {
+          // Import organizationService only when needed
+          const { organizationService } = await import('@/services/organizations/organization.service')
+          await organizationService.acceptInvitation(invitationToken)
+          toast.success("เข้าร่วมองค์กรสำเร็จ!")
+        } catch (inviteError) {
+          console.error('Error accepting invitation:', inviteError)
+          toast.warning("ไม่สามารถเข้าร่วมองค์กรได้ กรุณาลองใหม่")
+        }
+      }
+
+      // Save remember me preference
+      if (rememberMe) {
+        localStorage.setItem('rememberEmail', email)
+      } else {
+        localStorage.removeItem('rememberEmail')
+      }
+
+      // Redirect to organizations page or custom redirect
+      if (redirectTo) {
+        router.push(redirectTo)
+      } else {
+        router.push("/organizations")
+      }
     } catch (error: any) {
-      setError(error.message)
+      console.error('Login error:', error)
+      
+      // Handle specific error cases
+      if (error.message?.includes('Invalid login credentials')) {
+        setError('อีเมลหรือรหัสผ่านไม่ถูกต้อง')
+      } else if (error.message?.includes('Email not confirmed')) {
+        setError('กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ')
+      } else {
+        setError(error.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ')
+      }
     } finally {
       setLoading(false)
     }
   }
+
+  // Load remembered email
+  useEffect(() => {
+    const rememberedEmail = localStorage.getItem('rememberEmail')
+    if (rememberedEmail) {
+      setEmail(rememberedEmail)
+      setRememberMe(true)
+    }
+  }, [])
 
   const features = [
     { icon: MessageCircle, text: "รวมแชททุกแพลตฟอร์ม" },
@@ -72,6 +140,27 @@ export default function LoginPage() {
               รวมทุกแชทไว้ในที่เดียว
             </p>
           </div>
+
+          {/* Invitation Alert */}
+          {invitationToken && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 bg-brand-50 dark:bg-brand-950/30 border border-brand-200 dark:border-brand-800 rounded-lg"
+            >
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-brand-600 dark:text-brand-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-brand-900 dark:text-brand-100">
+                    คุณมีคำเชิญเข้าร่วมองค์กร
+                  </p>
+                  <p className="text-brand-700 dark:text-brand-300 mt-1">
+                    เข้าสู่ระบบเพื่อยอมรับคำเชิญ
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {/* Features Pills */}
           <div className="flex flex-wrap gap-2 justify-center mb-6">
@@ -121,6 +210,7 @@ export default function LoginPage() {
                     className="w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
                     placeholder="you@example.com"
                     required
+                    autoComplete="email"
                   />
                 </div>
               </div>
@@ -138,14 +228,20 @@ export default function LoginPage() {
                     className="w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
                     placeholder="••••••••"
                     required
+                    autoComplete="current-password"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <label className="flex items-center cursor-pointer">
-                  <input type="checkbox" className="mr-2 rounded border-gray-300 text-brand-500 focus:ring-brand-500" />
-                  <span className="text-sm">จดจำฉัน</span>
+                  <input 
+                    type="checkbox" 
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="mr-2 rounded border-gray-300 text-brand-500 focus:ring-brand-500" 
+                  />
+                  <span className="text-sm">จดจำอีเมล</span>
                 </label>
                 <Link
                   href="/forgot-password"
@@ -173,18 +269,54 @@ export default function LoginPage() {
               </motion.button>
             </form>
 
-            <div className="mt-6 text-center">
-              <span className="text-sm text-muted-foreground">
-                ยังไม่มีบัญชี?{" "}
-              </span>
-              <Link
-                href="/register"
-                className="text-sm font-medium text-brand-500 hover:text-brand-600 transition-colors"
-              >
-                สมัครสมาชิกฟรี
-              </Link>
+            <div className="mt-6">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t"></div>
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">หรือ</span>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {/* Social Login Options - For future implementation */}
+                {/* <button
+                  type="button"
+                  className="w-full flex items-center justify-center gap-3 px-4 py-2.5 border rounded-lg hover:bg-muted transition-colors"
+                >
+                  <img src="/google.svg" alt="Google" className="w-5 h-5" />
+                  <span className="text-sm font-medium">ดำเนินการต่อด้วย Google</span>
+                </button> */}
+
+                <div className="text-center">
+                  <span className="text-sm text-muted-foreground">
+                    ยังไม่มีบัญชี?{" "}
+                  </span>
+                  <Link
+                    href={invitationToken ? `/register?invitation=${invitationToken}` : "/register"}
+                    className="text-sm font-medium text-brand-500 hover:text-brand-600 transition-colors"
+                  >
+                    สมัครสมาชิกฟรี
+                  </Link>
+                </div>
+              </div>
             </div>
           </motion.div>
+
+          {/* Demo Account Info - Optional */}
+          {process.env.NODE_ENV === 'development' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
+              className="mt-4 p-4 bg-muted/50 rounded-lg text-xs text-center"
+            >
+              <p className="text-muted-foreground">
+                Demo Account: demo@example.com / demo123
+              </p>
+            </motion.div>
+          )}
         </motion.div>
       </div>
     </div>

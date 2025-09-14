@@ -1,16 +1,23 @@
+// src/app/(auth)/register/page.tsx
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { Mail, Lock, User, Building, Loader2, MessageCircle, CheckCircle } from "lucide-react"
+import { organizationService } from "@/services/organizations/organization.service"
+import { Mail, Lock, User, Building, Loader2, MessageCircle, CheckCircle, Gift } from "lucide-react"
 import { motion } from "framer-motion"
 import { AnimatedBackground } from "@/components/auth/animated-background"
+import { toast } from "sonner"
 
 export default function RegisterPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+  
+  // Check for invitation token
+  const invitationToken = searchParams.get('invitation')
   
   const [formData, setFormData] = useState({
     email: "",
@@ -22,6 +29,38 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState(1)
+  const [hasInvitation, setHasInvitation] = useState(false)
+  const [invitationDetails, setInvitationDetails] = useState<any>(null)
+
+  useEffect(() => {
+    if (invitationToken) {
+      checkInvitation()
+    }
+  }, [invitationToken])
+
+  const checkInvitation = async () => {
+    try {
+      // Get invitation details from database
+      const { data, error } = await supabase
+        .from('organization_invitations')
+        .select(`
+          *,
+          organization:organizations(name, slug)
+        `)
+        .eq('token', invitationToken)
+        .eq('status', 'pending')
+        .single()
+
+      if (data && !error) {
+        setHasInvitation(true)
+        setInvitationDetails(data)
+        // Pre-fill email from invitation
+        setFormData(prev => ({ ...prev, email: data.email }))
+      }
+    } catch (error) {
+      console.error('Error checking invitation:', error)
+    }
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -38,11 +77,16 @@ export default function RegisterPage() {
       return
     }
 
+    if (formData.password.length < 6) {
+      setError("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
+      return
+    }
+
     setLoading(true)
     setError(null)
 
     try {
-      // Step 1: Sign up user (ไม่สร้าง org ตอนนี้)
+      // Step 1: Sign up user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -56,7 +100,7 @@ export default function RegisterPage() {
 
       if (authError) throw authError
 
-      // Step 2: Create user record (without organization)
+      // Step 2: Create user record
       if (authData.user) {
         const { error: userError } = await supabase
           .from('users')
@@ -64,7 +108,7 @@ export default function RegisterPage() {
             id: authData.user.id,
             email: formData.email,
             name: formData.fullName,
-            role: 'admin', // Default role in users table
+            role: 'admin',
             is_active: true,
             language: 'th',
             timezone: 'Asia/Bangkok',
@@ -72,17 +116,40 @@ export default function RegisterPage() {
             updated_at: new Date().toISOString()
           })
         
-        if (userError && userError.code !== '23505') { // Ignore duplicate error
+        if (userError && userError.code !== '23505') {
           console.error('Error creating user record:', userError)
+        }
+
+        // Step 3: Handle invitation or create organization
+        if (hasInvitation && invitationToken) {
+          // Accept invitation
+          try {
+            await organizationService.acceptInvitation(invitationToken)
+            toast.success("เข้าร่วมองค์กรสำเร็จ!")
+          } catch (error) {
+            console.error('Error accepting invitation:', error)
+            toast.error("ไม่สามารถเข้าร่วมองค์กรได้")
+          }
+        } else if (formData.organizationName) {
+          // Create new organization
+          try {
+            await organizationService.createOrganization({
+              name: formData.organizationName,
+            })
+            toast.success("สร้างองค์กรสำเร็จ!")
+          } catch (error) {
+            console.error('Error creating organization:', error)
+            toast.error("ไม่สามารถสร้างองค์กรได้")
+          }
         }
       }
 
       // Show success message
       setStep(3)
       
-      // Redirect to organization selection page
+      // Redirect to organizations page
       setTimeout(() => {
-        router.push("/organizations") // จะสร้างหน้านี้ใหม่
+        router.push("/organizations")
       }, 2000)
     } catch (error: any) {
       console.error('Registration error:', error)
@@ -117,7 +184,9 @@ export default function RegisterPage() {
             <CheckCircle className="w-10 h-10 text-white" />
           </motion.div>
           <h2 className="text-2xl font-bold mb-2">สมัครสมาชิกสำเร็จ!</h2>
-          <p className="text-muted-foreground">กำลังพาคุณไปยังแดชบอร์ด...</p>
+          <p className="text-muted-foreground">
+            {hasInvitation ? "กำลังเข้าร่วมองค์กร..." : "กำลังพาคุณไปยังแดชบอร์ด..."}
+          </p>
         </motion.div>
       </div>
     )
@@ -147,26 +216,47 @@ export default function RegisterPage() {
             <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-brand-500 to-brand-700 bg-clip-text text-transparent">
               สมัครใช้งาน AooChat
             </h1>
-            <p className="text-muted-foreground mt-2 text-sm sm:text-base">
-              เริ่มต้นจัดการแชทอย่างมืออาชีพ
-            </p>
+            
+            {/* Show invitation info */}
+            {hasInvitation && invitationDetails && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-3 bg-brand-50 dark:bg-brand-950/30 rounded-lg"
+              >
+                <div className="flex items-center justify-center gap-2 text-brand-700 dark:text-brand-300">
+                  <Gift className="w-4 h-4" />
+                  <span className="text-sm">
+                    คุณได้รับเชิญเข้าร่วม <strong>{invitationDetails.organization?.name}</strong>
+                  </span>
+                </div>
+              </motion.div>
+            )}
+            
+            {!hasInvitation && (
+              <p className="text-muted-foreground mt-2 text-sm sm:text-base">
+                เริ่มต้นจัดการแชทอย่างมืออาชีพ
+              </p>
+            )}
           </div>
 
           {/* Benefits */}
-          <div className="grid grid-cols-2 gap-2 mb-6">
-            {benefits.map((benefit, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
-                className="flex items-center gap-2 text-xs sm:text-sm"
-              >
-                <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                <span>{benefit}</span>
-              </motion.div>
-            ))}
-          </div>
+          {!hasInvitation && (
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              {benefits.map((benefit, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className="flex items-center gap-2 text-xs sm:text-sm"
+                >
+                  <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                  <span>{benefit}</span>
+                </motion.div>
+              ))}
+            </div>
+          )}
 
           {/* Register Form */}
           <motion.div
@@ -225,23 +315,25 @@ export default function RegisterPage() {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      ชื่อองค์กร/บริษัท
-                    </label>
-                    <div className="relative group">
-                      <Building className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-brand-500 transition-colors" />
-                      <input
-                        type="text"
-                        name="organizationName"
-                        value={formData.organizationName}
-                        onChange={handleChange}
-                        className="w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
-                        placeholder="บริษัท ABC จำกัด"
-                        required
-                      />
+                  {!hasInvitation && (
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        ชื่อองค์กร/บริษัท
+                      </label>
+                      <div className="relative group">
+                        <Building className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-brand-500 transition-colors" />
+                        <input
+                          type="text"
+                          name="organizationName"
+                          value={formData.organizationName}
+                          onChange={handleChange}
+                          className="w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+                          placeholder="บริษัท ABC จำกัด"
+                          required={!hasInvitation}
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <motion.button
                     type="button"
@@ -271,6 +363,7 @@ export default function RegisterPage() {
                         className="w-full pl-10 pr-4 py-2.5 sm:py-3 border rounded-lg sm:rounded-xl bg-background/50 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
                         placeholder="you@example.com"
                         required
+                        disabled={hasInvitation}
                       />
                     </div>
                   </div>
@@ -332,7 +425,7 @@ export default function RegisterPage() {
                           กำลังสมัคร...
                         </span>
                       ) : (
-                        "สมัครสมาชิก"
+                        hasInvitation ? "สมัครและเข้าร่วมองค์กร" : "สมัครสมาชิก"
                       )}
                     </motion.button>
                   </div>

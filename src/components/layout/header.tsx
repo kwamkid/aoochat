@@ -1,3 +1,4 @@
+// src/components/layout/header.tsx
 "use client"
 
 import { useState, useRef, useEffect } from "react"
@@ -23,10 +24,15 @@ import {
   ShoppingCart,
   AlertCircle,
   X,
-  Command
+  Command,
+  Building,
+  ArrowRightLeft
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
+import { useOrganization } from "@/contexts/organization-context"
+import { createClient } from "@/lib/supabase/client"
+import type { UserOrganization } from "@/types/organization.types"
 
 // Notification Types
 type NotificationType = "message" | "customer" | "order" | "system"
@@ -93,22 +99,30 @@ interface HeaderProps {
       avatar_url?: string
     }
   } | null
+  organization?: any
 }
 
-export function Header({ user }: HeaderProps) {
+export function Header({ user, organization }: HeaderProps) {
   const router = useRouter()
+  const supabase = createClient()
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [isOrgSwitcherOpen, setIsOrgSwitcherOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [notifications, setNotifications] = useState(mockNotifications)
+  
+  // Get organization context
+  const orgContext = typeof window !== 'undefined' ? useOrganization() : null
+  const { userOrganizations, switchOrganization, switching } = orgContext || {}
   
   // Refs for click outside
   const notificationRef = useRef<HTMLDivElement>(null)
   const userMenuRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLDivElement>(null)
+  const orgSwitcherRef = useRef<HTMLDivElement>(null)
 
   // Check if mounted to avoid hydration mismatch
   useEffect(() => {
@@ -126,6 +140,9 @@ export function Header({ user }: HeaderProps) {
       }
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
         setIsSearchOpen(false)
+      }
+      if (orgSwitcherRef.current && !orgSwitcherRef.current.contains(event.target as Node)) {
+        setIsOrgSwitcherOpen(false)
       }
     }
 
@@ -146,6 +163,7 @@ export function Header({ user }: HeaderProps) {
         setIsSearchOpen(false)
         setIsNotificationOpen(false)
         setIsUserMenuOpen(false)
+        setIsOrgSwitcherOpen(false)
       }
     }
 
@@ -203,10 +221,84 @@ export function Header({ user }: HeaderProps) {
     }
   }
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.push("/login")
+  }
+
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 px-4 md:px-6">
       {/* Search Section */}
       <div className="flex-1 flex items-center gap-4">
+        {/* Organization Switcher (Quick Access) */}
+        {organization && userOrganizations && userOrganizations.length > 1 && (
+          <div ref={orgSwitcherRef} className="relative">
+            <button
+              onClick={() => setIsOrgSwitcherOpen(!isOrgSwitcherOpen)}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-muted/50 hover:bg-muted rounded-lg transition-colors"
+            >
+              <Building className="w-4 h-4" />
+              <span className="hidden sm:inline font-medium">{organization.name}</span>
+              <ArrowRightLeft className="w-3 h-3" />
+            </button>
+
+            <AnimatePresence>
+              {isOrgSwitcherOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                  className="absolute left-0 mt-2 w-64 bg-card border rounded-xl shadow-xl overflow-hidden"
+                >
+                  <div className="p-2">
+                    <p className="px-3 py-1 text-xs font-semibold text-muted-foreground">
+                      เปลี่ยนองค์กร
+                    </p>
+                    {userOrganizations.map((org) => (
+                      <button
+                        key={org.organization_id}
+                        onClick={() => {
+                          if (switchOrganization) {
+                            switchOrganization(org.organization_id)
+                            setIsOrgSwitcherOpen(false)
+                          }
+                        }}
+                        disabled={switching || org.organization_id === organization.id}
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center justify-between",
+                          org.organization_id === organization.id
+                            ? "bg-brand-50 dark:bg-brand-950/30 text-brand-600 dark:text-brand-400"
+                            : "hover:bg-muted"
+                        )}
+                      >
+                        <div>
+                          <p className="font-medium">{org.organization_name}</p>
+                          <p className="text-xs text-muted-foreground">{org.user_role}</p>
+                        </div>
+                        {org.organization_id === organization.id && (
+                          <Check className="w-4 h-4" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="border-t p-2">
+                    <button
+                      onClick={() => {
+                        router.push("/organizations")
+                        setIsOrgSwitcherOpen(false)
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors"
+                    >
+                      จัดการองค์กรทั้งหมด
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* Search Bar */}
         <div ref={searchRef} className="relative w-full max-w-md">
           <button
             onClick={() => setIsSearchOpen(true)}
@@ -445,32 +537,59 @@ export function Header({ user }: HeaderProps) {
                   <p className="text-xs text-muted-foreground">
                     {user?.email}
                   </p>
+                  {organization && (
+                    <p className="text-xs text-muted-foreground mt-1 font-medium">
+                      {organization.name}
+                    </p>
+                  )}
                 </div>
                 
                 <div className="p-1">
                   <button
-                    onClick={() => router.push("/profile")}
+                    onClick={() => {
+                      router.push("/profile")
+                      setIsUserMenuOpen(false)
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors"
                   >
                     <User className="w-4 h-4" />
                     โปรไฟล์
                   </button>
                   <button
-                    onClick={() => router.push("/settings")}
+                    onClick={() => {
+                      router.push("/organizations")
+                      setIsUserMenuOpen(false)
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors"
+                  >
+                    <Building className="w-4 h-4" />
+                    เปลี่ยนองค์กร
+                  </button>
+                  <button
+                    onClick={() => {
+                      router.push("/settings")
+                      setIsUserMenuOpen(false)
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors"
                   >
                     <Settings className="w-4 h-4" />
                     ตั้งค่า
                   </button>
                   <button
-                    onClick={() => router.push("/billing")}
+                    onClick={() => {
+                      router.push("/billing")
+                      setIsUserMenuOpen(false)
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors"
                   >
                     <CreditCard className="w-4 h-4" />
                     การเรียกเก็บเงิน
                   </button>
                   <button
-                    onClick={() => router.push("/security")}
+                    onClick={() => {
+                      router.push("/security")
+                      setIsUserMenuOpen(false)
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors"
                   >
                     <Shield className="w-4 h-4" />
@@ -480,7 +599,10 @@ export function Header({ user }: HeaderProps) {
                   <div className="my-1 border-t" />
                   
                   <button
-                    onClick={() => router.push("/help")}
+                    onClick={() => {
+                      router.push("/help")
+                      setIsUserMenuOpen(false)
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors"
                   >
                     <HelpCircle className="w-4 h-4" />
@@ -489,15 +611,13 @@ export function Header({ user }: HeaderProps) {
                   
                   <div className="my-1 border-t" />
                   
-                  <form action="/api/auth/signout" method="post">
-                    <button
-                      type="submit"
-                      className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      ออกจากระบบ
-                    </button>
-                  </form>
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    ออกจากระบบ
+                  </button>
                 </div>
               </motion.div>
             )}

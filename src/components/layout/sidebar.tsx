@@ -1,7 +1,7 @@
 // src/components/layout/sidebar.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useContext } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -34,9 +34,19 @@ import {
   Shield,
   CreditCard,
   Database,
-  Globe
+  Globe,
+  UserPlus
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+// Import context separately to handle cases where it might not exist
+let OrganizationContext: any
+try {
+  const contextModule = require("@/contexts/organization-context")
+  OrganizationContext = contextModule.OrganizationContext
+} catch {
+  // Context doesn't exist yet
+}
 
 // Platform Icons Component
 const PlatformIcon = ({ platform, className }: { platform: string; className?: string }) => {
@@ -49,8 +59,24 @@ const PlatformIcon = ({ platform, className }: { platform: string; className?: s
   return icons[platform] || <Circle className={className} />
 }
 
+// Navigation Item Type
+interface NavigationItem {
+  name: string
+  href: string
+  icon: any
+  badge?: string | null
+  badgeType?: string
+  permission?: string
+  description?: string
+}
+
+interface NavigationSection {
+  title: string
+  items: NavigationItem[]
+}
+
 // Navigation Items
-const navigationItems = [
+const navigationItems: NavigationSection[] = [
   {
     title: "หลัก",
     items: [
@@ -82,7 +108,8 @@ const navigationItems = [
         name: "ทีม",
         href: "/team",
         icon: UserCircle,
-        badge: null
+        badge: null,
+        permission: "can_view_all_conversations"
       },
       {
         name: "แท็ก",
@@ -95,19 +122,22 @@ const navigationItems = [
         href: "/automation",
         icon: Zap,
         badge: "PRO",
-        badgeType: "info"
+        badgeType: "info",
+        permission: "can_create_automations"
       },
       {
         name: "แคมเปญ",
         href: "/campaigns",
         icon: Megaphone,
-        badge: null
+        badge: null,
+        permission: "can_send_broadcasts"
       },
       {
         name: "รายงาน",
         href: "/reports",
         icon: FileText,
-        badge: null
+        badge: null,
+        permission: "can_view_reports"
       }
     ]
   },
@@ -120,13 +150,22 @@ const navigationItems = [
         icon: Plug,
         badge: "New",
         badgeType: "success",
-        description: "จัดการ Platform integrations"
+        description: "จัดการ Platform integrations",
+        permission: "can_manage_integrations"
+      },
+      {
+        name: "สมาชิก",
+        href: "/settings/members",
+        icon: UserPlus,
+        badge: null,
+        permission: "can_invite_members"
       },
       {
         name: "องค์กร",
         href: "/settings/organization",
         icon: Building,
-        badge: null
+        badge: null,
+        permission: "can_manage_organization"
       },
       {
         name: "ความปลอดภัย",
@@ -138,13 +177,15 @@ const navigationItems = [
         name: "การเรียกเก็บเงิน",
         href: "/settings/billing",
         icon: CreditCard,
-        badge: null
+        badge: null,
+        permission: "can_manage_billing"
       },
       {
         name: "API & Webhooks",
         href: "/settings/api",
         icon: Globe,
-        badge: null
+        badge: null,
+        permission: "can_manage_webhooks"
       },
       {
         name: "ตั้งค่าทั่วไป",
@@ -186,14 +227,19 @@ const platformConnections = [
 
 interface SidebarProps {
   className?: string
+  organization?: any
 }
 
-export function Sidebar({ className }: SidebarProps) {
+export function Sidebar({ className, organization }: SidebarProps) {
   const pathname = usePathname()
   const [isMobileOpen, setIsMobileOpen] = useState(false)
   const [isPlatformOpen, setIsPlatformOpen] = useState(false)
-  const [isTeamMenuOpen, setIsTeamMenuOpen] = useState(false)
+  const [isOrgMenuOpen, setIsOrgMenuOpen] = useState(false)
   const [expandedSections, setExpandedSections] = useState<string[]>(["หลัก"])
+  
+  // Try to use context if available, otherwise use default
+  const orgContext = OrganizationContext ? useContext(OrganizationContext) : null
+  const hasPermission = orgContext?.hasPermission || (() => true)
 
   // Auto-expand section if current path is in it
   useEffect(() => {
@@ -250,10 +296,10 @@ export function Sidebar({ className }: SidebarProps) {
         </button>
       </div>
 
-      {/* Team Selector */}
+      {/* Organization Selector */}
       <div className="px-4 py-3 border-b">
         <button
-          onClick={() => setIsTeamMenuOpen(!isTeamMenuOpen)}
+          onClick={() => setIsOrgMenuOpen(!isOrgMenuOpen)}
           className="w-full flex items-center justify-between p-2 hover:bg-muted rounded-lg transition-colors"
         >
           <div className="flex items-center gap-2">
@@ -261,30 +307,49 @@ export function Sidebar({ className }: SidebarProps) {
               <Building className="w-5 h-5 text-brand-600 dark:text-brand-400" />
             </div>
             <div className="text-left">
-              <p className="text-sm font-medium">บริษัท ABC</p>
-              <p className="text-xs text-muted-foreground">Pro Plan</p>
+              <p className="text-sm font-medium truncate max-w-[140px]">
+                {organization?.name || 'Select Organization'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {organization?.subscription_plan || 'Free'} Plan
+              </p>
             </div>
           </div>
           <ChevronDown className={cn(
             "w-4 h-4 text-muted-foreground transition-transform",
-            isTeamMenuOpen && "rotate-180"
+            isOrgMenuOpen && "rotate-180"
           )} />
         </button>
         
         <AnimatePresence>
-          {isTeamMenuOpen && (
+          {isOrgMenuOpen && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               className="mt-2 space-y-1 overflow-hidden"
             >
-              <button className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors">
+              <Link 
+                href="/organizations"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors flex items-center gap-2"
+              >
+                <Building className="w-3 h-3" />
                 เปลี่ยนองค์กร
-              </button>
-              <button className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors">
+              </Link>
+              <Link 
+                href="/settings/organization"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors flex items-center gap-2"
+              >
+                <Settings className="w-3 h-3" />
                 ตั้งค่าองค์กร
-              </button>
+              </Link>
+              <Link
+                href="/settings/members"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors flex items-center gap-2"
+              >
+                <UserPlus className="w-3 h-3" />
+                จัดการสมาชิก
+              </Link>
             </motion.div>
           )}
         </AnimatePresence>
@@ -319,6 +384,12 @@ export function Sidebar({ className }: SidebarProps) {
                     {section.items.map((item) => {
                       const isActive = pathname === item.href || 
                                       (item.href !== '/settings' && pathname.startsWith(item.href))
+                      
+                      // Check permission if specified
+                      if (item.permission && !hasPermission(item.permission)) {
+                        return null
+                      }
+                      
                       return (
                         <Link
                           key={item.href}

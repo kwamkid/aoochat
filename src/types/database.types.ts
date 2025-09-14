@@ -352,6 +352,155 @@ export type Database = {
           },
         ]
       }
+      organization_invitations: {
+        Row: {
+          accepted_at: string | null
+          accepted_by: string | null
+          created_at: string | null
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string
+          message: string | null
+          organization_id: string
+          permissions: Json | null
+          role: string
+          status: string | null
+          token: string
+          updated_at: string | null
+        }
+        Insert: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string | null
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by: string
+          message?: string | null
+          organization_id: string
+          permissions?: Json | null
+          role?: string
+          status?: string | null
+          token: string
+          updated_at?: string | null
+        }
+        Update: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          created_at?: string | null
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          message?: string | null
+          organization_id?: string
+          permissions?: Json | null
+          role?: string
+          status?: string | null
+          token?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_invitations_accepted_by_fkey"
+            columns: ["accepted_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_invitations_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_invitations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_members: {
+        Row: {
+          created_at: string | null
+          id: string
+          invitation_accepted_at: string | null
+          invitation_expires_at: string | null
+          invitation_token: string | null
+          invited_by: string | null
+          is_active: boolean | null
+          is_default: boolean | null
+          joined_at: string | null
+          organization_id: string
+          permissions: Json | null
+          role: string
+          settings: Json | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          invitation_accepted_at?: string | null
+          invitation_expires_at?: string | null
+          invitation_token?: string | null
+          invited_by?: string | null
+          is_active?: boolean | null
+          is_default?: boolean | null
+          joined_at?: string | null
+          organization_id: string
+          permissions?: Json | null
+          role?: string
+          settings?: Json | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          invitation_accepted_at?: string | null
+          invitation_expires_at?: string | null
+          invitation_token?: string | null
+          invited_by?: string | null
+          is_active?: boolean | null
+          is_default?: boolean | null
+          joined_at?: string | null
+          organization_id?: string
+          permissions?: Json | null
+          role?: string
+          settings?: Json | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_members_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_members_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string | null
@@ -563,9 +712,9 @@ export type Database = {
           id: string
           is_active: boolean | null
           language: string | null
+          last_accessed_organization_id: string | null
           last_active_at: string | null
           name: string | null
-          organization_id: string | null
           phone: string | null
           role: string | null
           settings: Json | null
@@ -579,9 +728,9 @@ export type Database = {
           id: string
           is_active?: boolean | null
           language?: string | null
+          last_accessed_organization_id?: string | null
           last_active_at?: string | null
           name?: string | null
-          organization_id?: string | null
           phone?: string | null
           role?: string | null
           settings?: Json | null
@@ -595,9 +744,9 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           language?: string | null
+          last_accessed_organization_id?: string | null
           last_active_at?: string | null
           name?: string | null
-          organization_id?: string | null
           phone?: string | null
           role?: string | null
           settings?: Json | null
@@ -606,8 +755,8 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "users_organization_id_fkey"
-            columns: ["organization_id"]
+            foreignKeyName: "users_last_accessed_organization_id_fkey"
+            columns: ["last_accessed_organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
@@ -619,7 +768,31 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      create_organization_with_owner: {
+        Args: {
+          p_org_industry?: string
+          p_org_name: string
+          p_org_size?: string
+          p_org_slug: string
+          p_user_id: string
+        }
+        Returns: string
+      }
+      get_user_organizations: {
+        Args: { p_user_id: string }
+        Returns: {
+          is_default: boolean
+          joined_at: string
+          organization_id: string
+          organization_name: string
+          organization_slug: string
+          user_role: string
+        }[]
+      }
+      set_default_organization: {
+        Args: { p_organization_id: string; p_user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
