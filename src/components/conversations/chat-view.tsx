@@ -11,25 +11,15 @@ import {
   Phone,
   Video,
   Info,
-  Clock,
-  CheckCheck,
-  Check,
-  AlertCircle,
   Image,
   FileText,
   Download,
   X,
   Mic,
   StopCircle,
-  Hash,
   User,
   Bot,
   Shield,
-  Star,
-  Archive,
-  Trash2,
-  Forward,
-  Reply,
   MessageCircle,
   ArrowDown
 } from "lucide-react"
@@ -38,51 +28,37 @@ import { format, isToday, isYesterday } from "date-fns"
 import { th } from "date-fns/locale"
 import type { Conversation, Message, MessageType, SenderType } from "@/types/conversation.types"
 
-// Message Status Icon
-const MessageStatus = ({ status, onRetry }: { status: Message['status']; onRetry?: () => void }) => {
+// Message Status - Only show for last message
+const MessageStatus = ({ status, onRetry, isLastMessage }: { 
+  status: Message['status']; 
+  onRetry?: () => void;
+  isLastMessage?: boolean;
+}) => {
+  // Only show status for the last message
+  if (!isLastMessage) return null
+  
   switch (status) {
     case 'sending':
-      return (
-        <div className="flex items-center gap-1">
-          <Clock className="w-3 h-3 text-muted-foreground animate-pulse" />
-          <span className="text-xs text-muted-foreground">Sending...</span>
-        </div>
-      )
+      return null
     case 'sent':
-      return <Check className="w-3 h-3 text-muted-foreground" />
     case 'delivered':
-      return <CheckCheck className="w-3 h-3 text-muted-foreground" />
+      return <span className="text-xs text-muted-foreground">sent</span>
     case 'read':
-      return <CheckCheck className="w-3 h-3 text-blue-500" />
+      return <span className="text-xs text-blue-500">read</span>
     case 'failed':
       return (
         <div className="flex items-center gap-1">
-          <AlertCircle className="w-3 h-3 text-red-500" />
-          <span className="text-xs text-red-500">Failed</span>
+          <span className="text-xs text-red-500">failed</span>
           {onRetry && (
             <button
               onClick={onRetry}
               className="text-xs text-red-500 underline hover:text-red-600 ml-1"
             >
-              Retry
+              retry
             </button>
           )}
         </div>
       )
-    default:
-      return null
-  }
-}
-
-// Sender Icon
-const SenderIcon = ({ type }: { type: SenderType }) => {
-  switch (type) {
-    case 'agent':
-      return <User className="w-3 h-3" />
-    case 'bot':
-      return <Bot className="w-3 h-3" />
-    case 'system':
-      return <Shield className="w-3 h-3" />
     default:
       return null
   }
@@ -96,7 +72,6 @@ interface ChatViewProps {
   onLoadMore?: () => void
   loading?: boolean
   hasMore?: boolean
-  typing?: boolean
   onScroll?: () => void
   platformFeatures?: {
     supportsQuickReplies?: boolean
@@ -112,7 +87,6 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   onLoadMore,
   loading = false,
   hasMore = false,
-  typing = false,
   onScroll,
   platformFeatures
 }, ref) => {
@@ -133,30 +107,25 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   // Use provided ref or local ref
   const containerRef = ref || messageContainerRef
 
-  // Auto scroll to bottom only for new messages (not when loading old messages)
+  // Auto scroll to bottom only for new messages
   useEffect(() => {
-    // Don't scroll if we're loading more old messages
     if (!isLoadingMoreRef.current && messages.length > 0) {
       scrollToBottom()
     }
   }, [messages.length])
 
-  // Maintain scroll position when loading more messages
+  // Maintain scroll position when loading more
   useEffect(() => {
     if (isLoadingMoreRef.current && containerRef && 'current' in containerRef && containerRef.current) {
       const scrollContainer = containerRef.current
       const newScrollHeight = scrollContainer.scrollHeight
       const scrollDiff = newScrollHeight - previousScrollHeightRef.current
-      
-      // Maintain the scroll position by adding the height difference
       scrollContainer.scrollTop = scrollDiff
-      
-      // Reset the flag
       isLoadingMoreRef.current = false
     }
   }, [messages, containerRef])
 
-  // Check if near bottom for scroll to bottom button
+  // Check if near bottom for scroll button
   useEffect(() => {
     const checkScrollPosition = () => {
       if (containerRef && 'current' in containerRef && containerRef.current) {
@@ -196,7 +165,6 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files && files.length > 0) {
-      // Handle file upload
       console.log('Files selected:', files)
     }
   }
@@ -220,6 +188,9 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
     acc[date].push(message)
     return acc
   }, {} as Record<string, Message[]>)
+
+  // Find last agent message
+  const lastAgentMessageId = [...messages].reverse().find(m => m.sender_type === 'agent')?.id
 
   if (!conversation) {
     return (
@@ -258,23 +229,9 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
           <div>
             <h3 className="font-semibold flex items-center gap-2">
               {conversation.customer.name}
-              {conversation.customer.tags.includes('vip') && (
-                <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-              )}
             </h3>
             <p className="text-sm text-muted-foreground">
-              {typing ? (
-                <span className="flex items-center gap-1">
-                  <span className="animate-pulse">กำลังพิมพ์</span>
-                  <span className="flex gap-1">
-                    <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </span>
-                </span>
-              ) : (
-                `ใช้งานล่าสุด ${formatMessageDate(conversation.customer.last_contact_at)}`
-              )}
+              ใช้งานล่าสุด {formatMessageDate(conversation.customer.last_contact_at)}
             </p>
           </div>
         </div>
@@ -306,7 +263,6 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
           if (containerRef && 'current' in containerRef && containerRef.current && !isLoadingMoreRef.current) {
             const { scrollTop } = containerRef.current
             
-            // Load more when scrolled near the top
             if (scrollTop < 100 && hasMore && !loading && onLoadMore) {
               isLoadingMoreRef.current = true
               previousScrollHeightRef.current = containerRef.current.scrollHeight
@@ -314,11 +270,10 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
             }
           }
           
-          // Call parent onScroll if provided
           if (onScroll) onScroll()
         }}
       >
-        {/* Load More Button/Indicator */}
+        {/* Load More */}
         {hasMore && (
           <div className="text-center py-2">
             {loading ? (
@@ -366,39 +321,12 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
                 message={message}
                 isOwn={message.sender_type === 'agent'}
                 showAvatar={index === 0 || msgs[index - 1]?.sender_id !== message.sender_id}
-                isSelected={selectedMessages.includes(message.id)}
-                onSelect={() => {
-                  setSelectedMessages(prev => 
-                    prev.includes(message.id) 
-                      ? prev.filter(id => id !== message.id)
-                      : [...prev, message.id]
-                  )
-                }}
-                onRetry={() => {
-                  if (message.status === 'failed' && onResendMessage) {
-                    onResendMessage(message)
-                  }
-                }}
+                isLastAgentMessage={message.id === lastAgentMessageId}
+                onRetry={() => onResendMessage?.(message)}
               />
             ))}
           </div>
         ))}
-
-        {/* Typing Indicator */}
-        {typing && (
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-              <User className="w-4 h-4 text-muted-foreground" />
-            </div>
-            <div className="bg-muted rounded-2xl px-4 py-2">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
-          </div>
-        )}
 
         <div ref={messagesEndRef} />
       </div>
@@ -418,46 +346,10 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
         )}
       </AnimatePresence>
 
-      {/* Selected Messages Actions */}
-      <AnimatePresence>
-        {selectedMessages.length > 0 && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="px-4 py-2 bg-muted/50 border-t flex items-center justify-between"
-          >
-            <span className="text-sm font-medium">
-              เลือก {selectedMessages.length} ข้อความ
-            </span>
-            <div className="flex items-center gap-2">
-              <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                <Reply className="w-4 h-4" />
-              </button>
-              <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                <Forward className="w-4 h-4" />
-              </button>
-              <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                <Star className="w-4 h-4" />
-              </button>
-              <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                <Trash2 className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={() => setSelectedMessages([])}
-                className="p-2 hover:bg-muted rounded-lg transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Message Input */}
       <div className="px-4 py-3 border-t bg-card">
         <div className="flex items-stretch gap-2">
-          {/* Attachment Button with Menu */}
+          {/* Attachment Button */}
           <div className="relative flex items-center">
             <button
               onClick={() => setShowAttachMenu(!showAttachMenu)}
@@ -506,8 +398,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
               onChange={(e) => setMessageInput(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="พิมพ์ข้อความ..."
-              disabled={typing}
-              className="w-full h-11 px-4 py-2.5 pr-12 bg-muted/50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all overflow-hidden disabled:opacity-50"
+              className="w-full h-11 px-4 py-2.5 pr-12 bg-muted/50 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all overflow-hidden"
               style={{ lineHeight: '1.5' }}
               rows={1}
             />
@@ -524,8 +415,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
             {messageInput.trim() ? (
               <button
                 onClick={handleSend}
-                disabled={typing}
-                className="h-11 w-11 flex items-center justify-center bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50"
+                className="h-11 w-11 flex items-center justify-center bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
               >
                 <SendIcon className="w-5 h-5" />
               </button>
@@ -549,30 +439,20 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
           </div>
         </div>
         
-        {/* Quick Replies / Platform Features */}
+        {/* Quick Replies */}
         <div className="flex gap-2 mt-2 overflow-x-auto scrollbar-hide">
-          {platformFeatures?.supportsQuickReplies && (
-            <>
-              {['สวัสดีครับ', 'รอสักครู่นะครับ', 'ขอบคุณครับ', 'ยินดีให้บริการครับ'].map((reply) => (
-                <button
-                  key={reply}
-                  onClick={() => setMessageInput(reply)}
-                  className="px-3 py-1 text-sm bg-muted hover:bg-muted/80 rounded-full whitespace-nowrap transition-colors"
-                >
-                  {reply}
-                </button>
-              ))}
-            </>
-          )}
-          {!platformFeatures?.supportsQuickReplies && (
-            <span className="text-xs text-muted-foreground py-1">
-              Platform: {conversation.platform}
-            </span>
-          )}
+          {['สวัสดีครับ', 'รอสักครู่นะครับ', 'ขอบคุณครับ', 'ยินดีให้บริการครับ'].map((reply) => (
+            <button
+              key={reply}
+              onClick={() => setMessageInput(reply)}
+              className="px-3 py-1 text-sm bg-muted hover:bg-muted/80 rounded-full whitespace-nowrap transition-colors"
+            >
+              {reply}
+            </button>
+          ))}
         </div>
       </div>
       
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -591,17 +471,17 @@ function MessageBubble({
   message,
   isOwn,
   showAvatar,
-  isSelected,
-  onSelect,
+  isLastAgentMessage,
   onRetry
 }: {
   message: Message
   isOwn: boolean
   showAvatar: boolean
-  isSelected: boolean
-  onSelect: () => void
+  isLastAgentMessage?: boolean
   onRetry?: () => void
 }) {
+  const [showTime, setShowTime] = useState(false)
+
   const renderMessageContent = () => {
     switch (message.message_type) {
       case 'text':
@@ -661,11 +541,12 @@ function MessageBubble({
       data-message-id={message.id}
       className={cn(
         "flex gap-2 group",
-        isOwn ? "justify-end" : "justify-start",
-        isSelected && "bg-brand-50/30 dark:bg-brand-950/10 -mx-2 px-2 py-1 rounded-lg"
+        isOwn ? "justify-end" : "justify-start"
       )}
-      onClick={onSelect}
+      onMouseEnter={() => setShowTime(true)}
+      onMouseLeave={() => setShowTime(false)}
     >
+      {/* Customer avatar */}
       {!isOwn && showAvatar && (
         <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
           <User className="w-4 h-4 text-muted-foreground" />
@@ -675,7 +556,7 @@ function MessageBubble({
       {!isOwn && !showAvatar && <div className="w-8" />}
       
       <div className={cn(
-        "max-w-xs lg:max-w-md",
+        "max-w-xs lg:max-w-md flex flex-col",
         isOwn ? "items-end" : "items-start"
       )}>
         <div className={cn(
@@ -695,33 +576,33 @@ function MessageBubble({
           )}
           
           {renderMessageContent()}
-          
-          {message.content.quick_replies && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {message.content.quick_replies.map((reply, index) => (
-                <button
-                  key={index}
-                  className="px-3 py-1 text-sm bg-white/20 hover:bg-white/30 rounded-full transition-colors"
-                >
-                  {reply.title}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
         
-        <div className="flex items-center gap-2 mt-1 px-1">
-          <span className="text-xs text-muted-foreground">
-            {format(new Date(message.created_at), 'HH:mm')}
-          </span>
-          {message.sender_type !== 'customer' && (
-            <SenderIcon type={message.sender_type} />
+        {/* Show time on hover or status for last agent message */}
+        <AnimatePresence>
+          {(showTime || (isOwn && isLastAgentMessage)) && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className={cn(
+                "flex items-center gap-2 mt-1 px-1 text-xs text-muted-foreground",
+                isOwn ? "flex-row-reverse" : "flex-row"
+              )}
+            >
+              {showTime && (
+                <span>{format(new Date(message.created_at), 'HH:mm')}</span>
+              )}
+              {isOwn && isLastAgentMessage && (
+                <MessageStatus 
+                  status={message.status} 
+                  onRetry={onRetry} 
+                  isLastMessage={true}
+                />
+              )}
+            </motion.div>
           )}
-          {isOwn && <MessageStatus status={message.status} onRetry={onRetry} />}
-          {message.is_automated && (
-            <Bot className="w-3 h-3 text-muted-foreground" />
-          )}
-        </div>
+        </AnimatePresence>
       </div>
     </motion.div>
   )

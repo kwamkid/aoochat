@@ -208,34 +208,47 @@ export default function ConversationsPage() {
   }, [messages.length, messagesLoadingMore, isNearBottom, scrollToBottom])
 
   // Handle send message with message service
-  const handleSendMessage = async (content: string) => {
+  // Handle send message - non-blocking for multiple messages
+  const handleSendMessage = async (content: string, retryMessageId?: string) => {
     if (!selectedConversation || !content.trim()) return
 
-    await safeExecute(async () => {
-      // Add optimistic message
-      const optimisticMessage: Message = {
-        id: `temp-${Date.now()}`,
-        conversation_id: selectedConversation.id,
-        sender_type: "agent",
-        sender_id: "current_user",
-        sender_name: "You",
-        message_type: "text",
-        content: { text: content },
-        is_private: false,
-        is_automated: false,
-        status: "sending",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
-      
+    // Generate unique ID for this message
+    const tempMessageId = retryMessageId || `temp-${Date.now()}-${Math.random()}`
+    
+    // Add optimistic message immediately (or update if retrying)
+    const optimisticMessage: Message = {
+      id: tempMessageId,
+      conversation_id: selectedConversation.id,
+      sender_type: "agent",
+      sender_id: "current_user",
+      sender_name: "You",
+      message_type: "text",
+      content: { text: content },
+      is_private: false,
+      is_automated: false,
+      status: "sending",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
+    
+    if (retryMessageId) {
+      // Update existing message to sending status
+      replaceMessage(retryMessageId, optimisticMessage)
+    } else {
+      // Add new optimistic message
       addMessage(optimisticMessage)
-      
+      // Scroll to bottom for new messages
+      setTimeout(() => scrollToBottom(), 100)
+    }
+    
+    // Send message asynchronously (non-blocking)
+    safeExecute(async () => {
       // Send message through message service
       const sentMessage = await sendMessage(content, 'text')
       
       if (sentMessage) {
         // Replace optimistic message with real one
-        replaceMessage(optimisticMessage.id, sentMessage)
+        replaceMessage(tempMessageId, sentMessage)
         
         // Update conversation's last message
         updateConversation(selectedConversation.id, {
@@ -248,10 +261,14 @@ export default function ConversationsPage() {
         moveToTop(selectedConversation.id)
       } else {
         // Update optimistic message to failed
-        const failedMessage = { ...optimisticMessage, status: 'failed' as const, error_message: 'Failed to send message' }
-        replaceMessage(optimisticMessage.id, failedMessage)
+        const failedMessage = { 
+          ...optimisticMessage, 
+          status: 'failed' as const, 
+          error_message: 'Failed to send message' 
+        }
+        replaceMessage(tempMessageId, failedMessage)
       }
-    }, 'handleSendMessage')
+    }, 'handleSendMessage-async')
   }
 
   // Mobile view - show either list or chat
