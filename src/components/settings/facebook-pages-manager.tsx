@@ -14,7 +14,8 @@ import {
   Unlink,
   AlertCircle,
   Settings,
-  Trash2
+  Trash2,
+  Webhook
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -49,8 +50,14 @@ export function FacebookPagesManager() {
     // Check for success callback
     const success = params.get('success')
     const pageCount = params.get('pages')
+    const subscribedCount = params.get('subscribed')
+    
     if (success === 'true' && pageCount) {
-      toast.success(`Successfully connected ${pageCount} Facebook page(s)`)
+      const message = subscribedCount 
+        ? `เชื่อมต่อ ${pageCount} Page สำเร็จ และตั้งค่า Webhook ${subscribedCount} Page`
+        : `เชื่อมต่อ ${pageCount} Facebook page สำเร็จ`
+      
+      toast.success(message)
       // Clean URL
       router.replace('/settings/platforms')
       // Reload pages
@@ -61,7 +68,7 @@ export function FacebookPagesManager() {
     // Check for error
     const error = params.get('error')
     if (error) {
-      toast.error(`Facebook connection failed: ${error}`)
+      toast.error(`การเชื่อมต่อ Facebook ล้มเหลว: ${error}`)
       router.replace('/settings/platforms')
       return
     }
@@ -86,7 +93,7 @@ export function FacebookPagesManager() {
   // Load pages from Facebook using token
   const loadAvailablePages = async (token: string) => {
     if (!currentOrganization) {
-      toast.error('Organization not loaded')
+      toast.error('กรุณาเลือกองค์กรก่อน')
       return
     }
     
@@ -108,29 +115,29 @@ export function FacebookPagesManager() {
       if (data.success && data.pages && data.pages.length > 0) {
         console.log(`Setting ${data.pages.length} available pages:`, data.pages)
         setAvailablePages(data.pages)
-        toast.success(`Found ${data.count || data.pages.length} Facebook page(s)`)
+        toast.success(`พบ ${data.count || data.pages.length} Facebook page`)
       } else if (data.pages && data.pages.length === 0) {
-        // No pages found - likely user didn't select any
+        // No pages found
         toast.error(
-          'No Facebook pages found. This usually happens when you choose "Opt in to current Pages only" but don\'t select any pages. Please reconnect and either choose "Opt in to all current and future Pages" or make sure to select specific pages.',
+          'ไม่พบ Facebook Page โปรดตรวจสอบว่าคุณเป็น Admin ของ Page',
           { duration: 8000 }
         )
         setUserToken(null)
         
         // Show reconnect button
         setTimeout(() => {
-          if (confirm('Would you like to reconnect to Facebook and select your pages?')) {
+          if (confirm('ต้องการเชื่อมต่อใหม่หรือไม่?')) {
             handleConnect()
           }
         }, 2000)
       } else {
         console.error('Failed to load pages:', data)
-        toast.error(data.error || 'Failed to load Facebook pages')
+        toast.error(data.error || 'ไม่สามารถโหลด Facebook pages ได้')
         setUserToken(null)
       }
     } catch (error) {
       console.error('Error loading pages:', error)
-      toast.error('Failed to connect to Facebook')
+      toast.error('เชื่อมต่อ Facebook ล้มเหลว')
       setUserToken(null)
     } finally {
       setLoading(false)
@@ -158,11 +165,11 @@ export function FacebookPagesManager() {
         }
       } else {
         console.error('Failed to load pages:', data.error)
-        toast.error('Failed to load connected pages')
+        toast.error('ไม่สามารถโหลด Page ที่เชื่อมต่อได้')
       }
     } catch (error) {
       console.error('Error loading connected pages:', error)
-      toast.error('Failed to load connected pages')
+      toast.error('ไม่สามารถโหลด Page ที่เชื่อมต่อได้')
     } finally {
       setLoading(false)
     }
@@ -171,7 +178,7 @@ export function FacebookPagesManager() {
   // Connect to Facebook - pass organization ID
   const handleConnect = () => {
     if (!currentOrganization) {
-      toast.error('Please select an organization first')
+      toast.error('กรุณาเลือกองค์กรก่อน')
       return
     }
     
@@ -182,7 +189,7 @@ export function FacebookPagesManager() {
   // Save selected pages
   const handleSavePages = async () => {
     if (!currentOrganization) {
-      toast.error('Organization not loaded')
+      toast.error('ไม่พบข้อมูลองค์กร')
       return
     }
     
@@ -194,7 +201,7 @@ export function FacebookPagesManager() {
     }).filter(Boolean)
     
     if (selectedPages.length === 0) {
-      toast.error('Please select at least one page')
+      toast.error('กรุณาเลือกอย่างน้อย 1 Page')
       return
     }
     
@@ -212,10 +219,14 @@ export function FacebookPagesManager() {
       const data = await response.json()
       
       if (data.success) {
-        toast.success(`Connected ${data.savedCount} page(s) successfully`)
+        const message = data.subscribedCount 
+          ? `เชื่อมต่อ ${data.savedCount} Page และตั้งค่า Webhook ${data.subscribedCount} Page สำเร็จ`
+          : `เชื่อมต่อ ${data.savedCount} Page สำเร็จ`
+        
+        toast.success(message)
         
         if (data.errorCount > 0) {
-          toast.warning(`Failed to save ${data.errorCount} page(s)`)
+          toast.warning(`ไม่สามารถบันทึก ${data.errorCount} Page`)
         }
         
         // Clear selection and reload
@@ -223,11 +234,11 @@ export function FacebookPagesManager() {
         setUserToken(null)
         await loadConnectedPages()
       } else {
-        toast.error(data.error || 'Failed to save pages')
+        toast.error(data.error || 'ไม่สามารถบันทึก Page ได้')
       }
     } catch (error) {
       console.error('Error saving pages:', error)
-      toast.error('Failed to save pages')
+      toast.error('ไม่สามารถบันทึก Page ได้')
     } finally {
       setConnecting(false)
     }
@@ -251,14 +262,14 @@ export function FacebookPagesManager() {
       const data = await response.json()
       
       if (data.success) {
-        toast.success(isActive ? 'Page activated' : 'Page deactivated')
+        toast.success(isActive ? 'เปิดใช้งาน Page แล้ว' : 'ปิดใช้งาน Page แล้ว')
         await loadConnectedPages()
       } else {
-        toast.error(data.error || 'Failed to update page status')
+        toast.error(data.error || 'ไม่สามารถอัปเดตสถานะ Page ได้')
       }
     } catch (error) {
       console.error('Error toggling page:', error)
-      toast.error('Failed to update page status')
+      toast.error('ไม่สามารถอัปเดตสถานะ Page ได้')
     }
   }
 
@@ -280,14 +291,14 @@ export function FacebookPagesManager() {
       const data = await response.json()
       
       if (data.success) {
-        toast.success('Page synced successfully')
+        toast.success('Sync Page สำเร็จ')
         await loadConnectedPages()
       } else {
-        toast.error(data.error || 'Failed to sync page')
+        toast.error(data.error || 'Sync Page ล้มเหลว')
       }
     } catch (error) {
       console.error('Error syncing page:', error)
-      toast.error('Failed to sync page')
+      toast.error('Sync Page ล้มเหลว')
     } finally {
       setSyncing(null)
     }
@@ -297,7 +308,7 @@ export function FacebookPagesManager() {
   const deletePage = async (pageId: string) => {
     if (!currentOrganization) return
     
-    if (!confirm('Are you sure you want to remove this page connection?')) {
+    if (!confirm('ต้องการลบการเชื่อมต่อ Page นี้หรือไม่?')) {
       return
     }
     
@@ -310,14 +321,14 @@ export function FacebookPagesManager() {
       const data = await response.json()
       
       if (data.success) {
-        toast.success('Page removed successfully')
+        toast.success('ลบ Page สำเร็จ')
         await loadConnectedPages()
       } else {
-        toast.error(data.error || 'Failed to remove page')
+        toast.error(data.error || 'ไม่สามารถลบ Page ได้')
       }
     } catch (error) {
       console.error('Error deleting page:', error)
-      toast.error('Failed to remove page')
+      toast.error('ไม่สามารถลบ Page ได้')
     }
   }
 
@@ -327,7 +338,7 @@ export function FacebookPagesManager() {
       <div className="p-6 max-w-5xl mx-auto">
         <div className="bg-card rounded-lg shadow-sm border p-12 text-center">
           <Loader2 className="w-8 h-8 animate-spin mx-auto text-blue-600 mb-4" />
-          <p className="text-muted-foreground">Loading organization...</p>
+          <p className="text-muted-foreground">กำลังโหลดข้อมูลองค์กร...</p>
         </div>
       </div>
     )
@@ -338,12 +349,12 @@ export function FacebookPagesManager() {
       <div className="p-6 max-w-5xl mx-auto">
         <div className="bg-card rounded-lg shadow-sm border p-12 text-center">
           <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-          <p className="text-muted-foreground">No organization selected</p>
+          <p className="text-muted-foreground">ไม่พบข้อมูลองค์กร</p>
           <button
             onClick={() => router.push('/organizations')}
             className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
           >
-            Select Organization
+            เลือกองค์กร
           </button>
         </div>
       </div>
@@ -363,7 +374,7 @@ export function FacebookPagesManager() {
               <div>
                 <h2 className="text-xl font-semibold">Facebook Pages</h2>
                 <p className="text-sm text-muted-foreground">
-                  Manage Facebook pages for {currentOrganization.name}
+                  จัดการ Facebook Pages สำหรับ {currentOrganization.name}
                 </p>
               </div>
             </div>
@@ -374,7 +385,7 @@ export function FacebookPagesManager() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
               >
                 <Link2 className="w-4 h-4" />
-                Connect Facebook Pages
+                เชื่อมต่อ Facebook Pages
               </button>
             )}
           </div>
@@ -384,27 +395,14 @@ export function FacebookPagesManager() {
         {loading && pages.length === 0 && (
           <div className="p-12 text-center">
             <Loader2 className="w-8 h-8 animate-spin mx-auto text-blue-600 mb-4" />
-            <p className="text-muted-foreground">Loading pages...</p>
-          </div>
-        )}
-
-        {/* Debug info */}
-        {userToken && (
-          <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded m-6">
-            <p className="text-xs font-mono">
-              Token: {userToken.substring(0, 20)}...
-              <br />
-              Available Pages: {availablePages.length}
-              <br />
-              Loading: {loading ? 'Yes' : 'No'}
-            </p>
+            <p className="text-muted-foreground">กำลังโหลด Pages...</p>
           </div>
         )}
 
         {/* Page selection (after OAuth) */}
         {!loading && availablePages.length > 0 && (
           <div className="p-6">
-            <h3 className="font-medium mb-4">Select pages to connect:</h3>
+            <h3 className="font-medium mb-4">เลือก Pages ที่ต้องการเชื่อมต่อ:</h3>
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {availablePages.map((page) => (
                 <label
@@ -439,7 +437,7 @@ export function FacebookPagesManager() {
                 ) : (
                   <CheckCircle className="w-4 h-4" />
                 )}
-                Save Selected Pages
+                บันทึก Pages ที่เลือก
               </button>
               <button
                 onClick={() => {
@@ -448,7 +446,7 @@ export function FacebookPagesManager() {
                 }}
                 className="px-4 py-2 border rounded-lg hover:bg-muted"
               >
-                Cancel
+                ยกเลิก
               </button>
             </div>
           </div>
@@ -458,13 +456,13 @@ export function FacebookPagesManager() {
         {!loading && !userToken && pages.length > 0 && (
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-medium">Connected Pages ({pages.length})</h3>
+              <h3 className="font-medium">Pages ที่เชื่อมต่อแล้ว ({pages.length})</h3>
               <button
                 onClick={handleConnect}
                 className="px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-2"
               >
                 <Link2 className="w-3 h-3" />
-                Add More Pages
+                เพิ่ม Pages
               </button>
             </div>
             
@@ -486,11 +484,17 @@ export function FacebookPagesManager() {
                       <p className="font-medium">{page.account_name}</p>
                       <div className="flex items-center gap-4 mt-1">
                         <p className="text-sm text-muted-foreground">
-                          {page.is_active ? 'Receiving messages' : 'Inactive'}
+                          {page.is_active ? 'กำลังรับข้อความ' : 'ไม่ใช้งาน'}
                         </p>
+                        {page.metadata?.webhook_subscribed && (
+                          <div className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                            <Webhook className="w-3 h-3" />
+                            Webhook ทำงาน
+                          </div>
+                        )}
                         {page.last_sync_at && (
                           <p className="text-xs text-muted-foreground">
-                            Last sync: {new Date(page.last_sync_at).toLocaleString('th-TH')}
+                            Sync ล่าสุด: {new Date(page.last_sync_at).toLocaleString('th-TH')}
                           </p>
                         )}
                       </div>
@@ -510,12 +514,12 @@ export function FacebookPagesManager() {
                       {page.is_active ? (
                         <>
                           <Unlink className="w-3 h-3" />
-                          Deactivate
+                          ปิดใช้งาน
                         </>
                       ) : (
                         <>
                           <Link2 className="w-3 h-3" />
-                          Activate
+                          เปิดใช้งาน
                         </>
                       )}
                     </button>
@@ -550,13 +554,13 @@ export function FacebookPagesManager() {
         {!loading && !userToken && pages.length === 0 && (
           <div className="p-12 text-center">
             <Facebook className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-            <p className="text-muted-foreground mb-4">No Facebook pages connected yet</p>
+            <p className="text-muted-foreground mb-4">ยังไม่มี Facebook Pages ที่เชื่อมต่อ</p>
             <button
               onClick={handleConnect}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
             >
               <Link2 className="w-4 h-4" />
-              Connect Your First Page
+              เชื่อมต่อ Page แรกของคุณ
             </button>
           </div>
         )}
@@ -567,13 +571,13 @@ export function FacebookPagesManager() {
         <div className="flex gap-3">
           <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
           <div className="space-y-2">
-            <h4 className="font-medium text-blue-900 dark:text-blue-100">How to connect:</h4>
+            <h4 className="font-medium text-blue-900 dark:text-blue-100">วิธีการเชื่อมต่อ:</h4>
             <ol className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-decimal list-inside">
-              <li>Click "Connect Facebook Pages"</li>
-              <li>Login with your Facebook account</li>
-              <li>Authorize the app to access your pages</li>
-              <li>Your pages will be automatically saved</li>
-              <li>Activate the pages you want to receive messages from</li>
+              <li>คลิก "เชื่อมต่อ Facebook Pages"</li>
+              <li>เข้าสู่ระบบด้วยบัญชี Facebook</li>
+              <li>อนุญาตให้แอปเข้าถึง Pages ของคุณ</li>
+              <li>ระบบจะตั้งค่า Webhook อัตโนมัติ</li>
+              <li>พร้อมรับข้อความจากลูกค้าทันที</li>
             </ol>
           </div>
         </div>

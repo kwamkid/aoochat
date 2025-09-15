@@ -20,6 +20,53 @@ function getBaseUrl(request: NextRequest): string {
 }
 
 /**
+ * Subscribe page to webhook automatically
+ */
+async function subscribePageToWebhook(pageId: string, accessToken: string): Promise<boolean> {
+  try {
+    console.log(`Auto-subscribing page ${pageId} to webhook...`)
+    
+    const url = `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${pageId}/subscribed_apps`
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        subscribed_fields: [
+          'messages',
+          'messaging_postbacks',
+          'messaging_optins',
+          'message_deliveries',
+          'message_reads',
+          'messaging_payments',
+          'messaging_pre_checkouts',
+          'messaging_checkout_updates',
+          'messaging_handovers',
+          'messaging_policy_enforcement',
+          'message_reactions'
+        ].join(','),
+        access_token: accessToken
+      })
+    })
+    
+    const data = await response.json()
+    
+    if (!response.ok) {
+      console.error(`Failed to subscribe page ${pageId}:`, data.error)
+      return false
+    }
+    
+    console.log(`✅ Page ${pageId} subscribed to webhook successfully`)
+    return true
+  } catch (error) {
+    console.error(`Error subscribing page ${pageId}:`, error)
+    return false
+  }
+}
+
+/**
  * GET handler for Facebook OAuth
  */
 export async function GET(request: NextRequest) {
@@ -123,6 +170,8 @@ export async function GET(request: NextRequest) {
           return NextResponse.redirect(`${baseUrl}/settings/platforms?error=not_authenticated`)
         }
         
+        let subscribedCount = 0
+        
         // Save each page to database
         for (const page of pagesData.data) {
           const { error: saveError } = await supabase
@@ -133,7 +182,7 @@ export async function GET(request: NextRequest) {
               account_id: page.id,
               account_name: page.name,
               access_token: page.access_token,
-              is_active: false, // Start as inactive, user can activate later
+              is_active: true, // Auto-activate
               metadata: {
                 category: page.category,
                 tasks: page.tasks,
@@ -148,11 +197,19 @@ export async function GET(request: NextRequest) {
           
           if (saveError) {
             console.error('Error saving page:', saveError)
+          } else {
+            // Auto-subscribe page to webhook after saving
+            const subscribed = await subscribePageToWebhook(page.id, page.access_token)
+            if (subscribed) {
+              subscribedCount++
+            }
           }
         }
         
         // Clear cookies
-        const response = NextResponse.redirect(`${baseUrl}/settings/platforms?success=true&pages=${pagesData.data.length}`)
+        const response = NextResponse.redirect(
+          `${baseUrl}/settings/platforms?success=true&pages=${pagesData.data.length}&subscribed=${subscribedCount}`
+        )
         response.cookies.delete('fb_oauth_state')
         response.cookies.delete('fb_oauth_org_id')
         
@@ -333,6 +390,7 @@ export async function PUT(request: NextRequest) {
     // Save pages to database
     const savedPages = []
     const errors = []
+    let subscribedCount = 0
     
     for (const page of pages) {
       // Check if page has required fields
@@ -402,10 +460,22 @@ export async function PUT(request: NextRequest) {
           } else if (insertData) {
             savedPages.push(insertData)
             console.log(`✅ Saved page via insert: ${page.account_name}`)
+            
+            // Auto-subscribe to webhook after saving
+            if (page.access_token) {
+              const subscribed = await subscribePageToWebhook(page.account_id, page.access_token)
+              if (subscribed) subscribedCount++
+            }
           }
         } else if (data) {
           savedPages.push(data)
           console.log(`✅ Saved page via upsert: ${page.account_name}`)
+          
+          // Auto-subscribe to webhook after saving
+          if (page.access_token) {
+            const subscribed = await subscribePageToWebhook(page.account_id, page.access_token)
+            if (subscribed) subscribedCount++
+          }
         } else {
           console.warn('No data returned from upsert, but no error either')
           errors.push({ 
@@ -425,6 +495,7 @@ export async function PUT(request: NextRequest) {
     // Final result
     console.log('=== Save Operation Complete ===')
     console.log(`Successfully saved: ${savedPages.length}`)
+    console.log(`Successfully subscribed: ${subscribedCount}`)
     console.log(`Errors: ${errors.length}`)
     if (errors.length > 0) {
       console.log('Error details:', errors)
@@ -434,6 +505,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ 
       success: savedPages.length > 0 || errors.length === 0,
       savedCount: savedPages.length,
+      subscribedCount,
       errorCount: errors.length,
       errors: errors.length > 0 ? errors : undefined,
       savedPages: savedPages.map(p => ({ 
@@ -479,6 +551,20 @@ export async function PATCH(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+    
+    // Get page details first to get access token
+    const { data: page } = await supabase
+      .from('platform_accounts')
+      .select('*')
+      .eq('account_id', pageId)
+      .eq('platform', 'facebook')
+      .eq('organization_id', organizationId)
+      .single()
+    
+    if (page && isActive && page.access_token) {
+      // If activating, subscribe to webhook
+      await subscribePageToWebhook(pageId, page.access_token)
     }
     
     const { data, error } = await supabase
