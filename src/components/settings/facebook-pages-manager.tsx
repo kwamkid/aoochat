@@ -2,6 +2,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
+import { useOrganization } from '@/contexts/organization-context'
 import { 
   Facebook, 
   CheckCircle, 
@@ -29,6 +30,7 @@ interface FacebookPage {
 }
 
 export function FacebookPagesManager() {
+  const { currentOrganization, loading: orgLoading } = useOrganization()
   const [pages, setPages] = useState<FacebookPage[]>([])
   const [availablePages, setAvailablePages] = useState<FacebookPage[]>([])
   const [loading, setLoading] = useState(false)
@@ -36,8 +38,19 @@ export function FacebookPagesManager() {
   const [syncing, setSyncing] = useState<string | null>(null)
   const [userToken, setUserToken] = useState<string | null>(null)
 
+  // Debug: Log organization context
+  useEffect(() => {
+    console.log('Organization Context:', {
+      loading: orgLoading,
+      currentOrganization: currentOrganization,
+      orgId: currentOrganization?.id
+    })
+  }, [currentOrganization, orgLoading])
+
   // Check for token in URL (after OAuth redirect)
   useEffect(() => {
+    if (!currentOrganization) return
+    
     const params = new URLSearchParams(window.location.search)
     const token = params.get('token')
     if (token) {
@@ -49,16 +62,24 @@ export function FacebookPagesManager() {
     
     // Load connected pages
     loadConnectedPages()
-  }, [])
+  }, [currentOrganization])
 
   // Load pages from Facebook
   const loadAvailablePages = async (token: string) => {
+    if (!currentOrganization) {
+      toast.error('Organization not loaded')
+      return
+    }
+    
     setLoading(true)
     try {
       const response = await fetch('/api/platforms/facebook/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userAccessToken: token })
+        body: JSON.stringify({ 
+          userAccessToken: token,
+          organizationId: currentOrganization.id
+        })
       })
       
       const data = await response.json()
@@ -77,11 +98,21 @@ export function FacebookPagesManager() {
 
   // Load already connected pages from database
   const loadConnectedPages = async () => {
+    if (!currentOrganization) {
+      console.log('No organization, skipping page load')
+      return
+    }
+    
     try {
-      const response = await fetch('/api/platforms/facebook/pages')
+      const response = await fetch(`/api/platforms/facebook/pages?orgId=${currentOrganization.id}`)
       const data = await response.json()
+      
+      console.log('Loaded pages:', data)
+      
       if (data.success) {
         setPages(data.pages || [])
+      } else {
+        console.error('Failed to load pages:', data.error)
       }
     } catch (error) {
       console.error('Error loading connected pages:', error)
@@ -90,11 +121,20 @@ export function FacebookPagesManager() {
 
   // Connect to Facebook
   const handleConnect = () => {
+    if (!currentOrganization) {
+      toast.error('Please select an organization first')
+      return
+    }
     window.location.href = '/api/platforms/facebook/connect?action=auth'
   }
 
   // Save selected pages
   const handleSavePages = async () => {
+    if (!currentOrganization) {
+      toast.error('Organization not loaded')
+      return
+    }
+    
     // Get selected pages from checkboxes
     const checkboxes = document.querySelectorAll('input[name="page-select"]:checked')
     const selectedPages = Array.from(checkboxes).map(cb => {
@@ -112,7 +152,10 @@ export function FacebookPagesManager() {
       const response = await fetch('/api/platforms/facebook/connect', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pages: selectedPages })
+        body: JSON.stringify({ 
+          pages: selectedPages,
+          organizationId: currentOrganization.id
+        })
       })
       
       const data = await response.json()
@@ -122,7 +165,7 @@ export function FacebookPagesManager() {
         setAvailablePages([])
         setUserToken(null)
       } else {
-        toast.error('Failed to save pages')
+        toast.error(data.error || 'Failed to save pages')
       }
     } catch (error) {
       console.error('Error saving pages:', error)
@@ -134,11 +177,17 @@ export function FacebookPagesManager() {
 
   // Toggle page active status
   const togglePageStatus = async (pageId: string, isActive: boolean) => {
+    if (!currentOrganization) return
+    
     try {
       const response = await fetch('/api/platforms/facebook/connect', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageId, isActive })
+        body: JSON.stringify({ 
+          pageId, 
+          isActive,
+          organizationId: currentOrganization.id
+        })
       })
       
       const data = await response.json()
@@ -156,13 +205,18 @@ export function FacebookPagesManager() {
 
   // Sync page data
   const syncPage = async (pageId: string) => {
+    if (!currentOrganization) return
+    
     setSyncing(pageId)
     try {
       // Subscribe page to webhook
       const response = await fetch('/api/platforms/facebook/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageId })
+        body: JSON.stringify({ 
+          pageId,
+          organizationId: currentOrganization.id
+        })
       })
       
       const data = await response.json()
@@ -170,7 +224,7 @@ export function FacebookPagesManager() {
         toast.success('Page synced successfully')
         await loadConnectedPages()
       } else {
-        toast.error('Failed to sync page')
+        toast.error(data.error || 'Failed to sync page')
       }
     } catch (error) {
       console.error('Error syncing page:', error)
@@ -182,12 +236,14 @@ export function FacebookPagesManager() {
 
   // Delete page connection
   const deletePage = async (pageId: string) => {
+    if (!currentOrganization) return
+    
     if (!confirm('Are you sure you want to remove this page connection?')) {
       return
     }
     
     try {
-      const response = await fetch(`/api/platforms/facebook/pages/${pageId}`, {
+      const response = await fetch(`/api/platforms/facebook/connect?pageId=${pageId}`, {
         method: 'DELETE'
       })
       
@@ -202,6 +258,20 @@ export function FacebookPagesManager() {
       console.error('Error deleting page:', error)
       toast.error('Failed to remove page')
     }
+  }
+
+  // Show loading state if organization not loaded
+  if (orgLoading || !currentOrganization) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto">
+        <div className="bg-card rounded-lg shadow-sm border p-12 text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto text-blue-600 mb-4" />
+          <p className="text-muted-foreground">
+            {orgLoading ? 'Loading organization...' : 'No organization selected'}
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -400,12 +470,15 @@ export function FacebookPagesManager() {
           <div className="space-y-2">
             <h4 className="font-medium text-blue-900 dark:text-blue-100">วิธีการเชื่อมต่อ:</h4>
             <ol className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-decimal list-inside">
-              <li>คลิก "เชื่อมต่อเพจใหม่" และเข้าสู่ระบบด้วย Facebook</li>
+              <li>คลิก เชื่อมต่อเพจใหม่ และเข้าสู่ระบบด้วย Facebook</li>
               <li>อนุญาตสิทธิ์ให้แอปเข้าถึงเพจของคุณ</li>
               <li>เลือกเพจที่ต้องการเชื่อมต่อ</li>
-              <li>คลิก "บันทึกการเชื่อมต่อ"</li>
+              <li>คลิก บันทึกการเชื่อมต่อ</li>
               <li>เปิด/ปิดการรับข้อความจากแต่ละเพจได้ตามต้องการ</li>
             </ol>
+            <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+              Organization: {currentOrganization.name} (ID: {currentOrganization.id})
+            </p>
           </div>
         </div>
       </div>

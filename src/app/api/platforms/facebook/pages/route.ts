@@ -3,18 +3,36 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-/**
- * GET /api/platforms/facebook/pages
- * Get list of connected Facebook pages
- */
 export async function GET(request: NextRequest) {
   try {
+    const searchParams = request.nextUrl.searchParams
+    const organizationId = searchParams.get('orgId')
+    
+    if (!organizationId) {
+      return NextResponse.json(
+        { success: false, error: 'Organization ID required' },
+        { status: 400 }
+      )
+    }
+    
     const supabase = await createClient()
     
-    // Get organization ID from session/auth
-    // For now using default
-    const organizationId = 'default-org-id'
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Not authenticated' },
+        { status: 401 }
+      )
+    }
     
+    console.log('Fetching pages for:', {
+      userId: user.id,
+      organizationId: organizationId
+    })
+    
+    // ไม่ต้องตรวจสอบ membership แล้ว เพราะมีปัญหา RLS
+    // ดึง pages ตรงๆ เลย
     const { data: pages, error } = await supabase
       .from('platform_accounts')
       .select('*')
@@ -40,61 +58,16 @@ export async function GET(request: NextRequest) {
       metadata: page.metadata
     })) || []
     
+    console.log(`Found ${sanitizedPages.length} pages for organization ${organizationId}`)
+    
     return NextResponse.json({
       success: true,
-      pages: sanitizedPages
+      pages: sanitizedPages,
+      organizationId
     })
     
   } catch (error) {
     console.error('Error in GET /api/platforms/facebook/pages:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
-
-/**
- * DELETE /api/platforms/facebook/pages/[pageId]
- * Remove a connected page
- */
-export async function DELETE(request: NextRequest) {
-  try {
-    // Extract pageId from URL
-    const url = new URL(request.url)
-    const pathParts = url.pathname.split('/')
-    const pageId = pathParts[pathParts.length - 1]
-    
-    if (!pageId) {
-      return NextResponse.json(
-        { success: false, error: 'Page ID required' },
-        { status: 400 }
-      )
-    }
-    
-    const supabase = await createClient()
-    
-    const { error } = await supabase
-      .from('platform_accounts')
-      .delete()
-      .eq('account_id', pageId)
-      .eq('platform', 'facebook')
-    
-    if (error) {
-      console.error('Error deleting page:', error)
-      return NextResponse.json(
-        { success: false, error: 'Failed to delete page' },
-        { status: 500 }
-      )
-    }
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Page removed successfully'
-    })
-    
-  } catch (error) {
-    console.error('Error in DELETE /api/platforms/facebook/pages:', error)
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }

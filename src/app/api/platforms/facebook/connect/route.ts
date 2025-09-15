@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getCurrentOrganizationId } from '@/lib/organization-helper'
 
 // Facebook OAuth configuration
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID || '765754886426074'
@@ -116,7 +117,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { userAccessToken } = body
+    const { userAccessToken, organizationId } = body
     
     if (!userAccessToken) {
       return NextResponse.json({ error: 'No access token provided' }, { status: 400 })
@@ -168,10 +169,30 @@ export async function PUT(request: NextRequest) {
     
     const supabase = await createClient()
     
-    // Get current user/organization
+    // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+    
+    // Get organization ID from body or from user's current organization
+    const organizationId = body.organizationId || await getCurrentOrganizationId(user.id)
+    
+    if (!organizationId) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 400 })
+    }
+    
+    // Verify user has permission in this organization
+    const { data: member } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('organization_id', organizationId)
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .single()
+    
+    if (!member || !['owner', 'admin', 'manager'].includes(member.role)) {
+      return NextResponse.json({ error: 'Not authorized to manage platform connections' }, { status: 403 })
     }
     
     // Save pages to database
@@ -179,19 +200,23 @@ export async function PUT(request: NextRequest) {
       const { error } = await supabase
         .from('platform_accounts')
         .upsert({
+          organization_id: organizationId,
           platform: 'facebook',
           account_id: page.account_id,
           account_name: page.account_name,
           access_token: page.access_token,
           is_active: true,
           metadata: page.metadata || {},
-          last_sync_at: new Date().toISOString()
+          last_sync_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         }, {
-          onConflict: 'platform,account_id'
+          onConflict: 'organization_id,platform,account_id'
         })
       
       if (error) {
         console.error('Error saving page:', error)
+        // Continue with other pages even if one fails
       }
     }
     
@@ -217,20 +242,30 @@ export async function PATCH(request: NextRequest) {
     
     const supabase = await createClient()
     
-    // Get current user's organization
+    // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
     
-    const { data: userData } = await supabase
-      .from('users')
-      .select('organization_id')
-      .eq('id', user.id)
+    // Get organization ID
+    const organizationId = body.organizationId || await getCurrentOrganizationId(user.id)
+    
+    if (!organizationId) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 400 })
+    }
+    
+    // Verify permissions
+    const { data: member } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('organization_id', organizationId)
+      .eq('user_id', user.id)
+      .eq('is_active', true)
       .single()
     
-    if (!userData?.organization_id) {
-      return NextResponse.json({ error: 'No organization found' }, { status: 400 })
+    if (!member || !['owner', 'admin', 'manager'].includes(member.role)) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
     }
     
     const { error } = await supabase
@@ -241,7 +276,7 @@ export async function PATCH(request: NextRequest) {
       })
       .eq('account_id', pageId)
       .eq('platform', 'facebook')
-      .eq('organization_id', userData.organization_id)
+      .eq('organization_id', organizationId)
     
     if (error) {
       console.error('Error updating page:', error)
@@ -252,6 +287,66 @@ export async function PATCH(request: NextRequest) {
     
   } catch (error) {
     console.error('Error in PATCH handler:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+/**
+ * DELETE handler for removing page connection
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const pageId = searchParams.get('pageId')
+    
+    if (!pageId) {
+      return NextResponse.json({ error: 'Page ID required' }, { status: 400 })
+    }
+    
+    const supabase = await createClient()
+    
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+    
+    // Get organization ID
+    const organizationId = await getCurrentOrganizationId(user.id)
+    
+    if (!organizationId) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 400 })
+    }
+    
+    // Verify permissions
+    const { data: member } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('organization_id', organizationId)
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .single()
+    
+    if (!member || !['owner', 'admin', 'manager'].includes(member.role)) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
+    }
+    
+    const { error } = await supabase
+      .from('platform_accounts')
+      .delete()
+      .eq('account_id', pageId)
+      .eq('platform', 'facebook')
+      .eq('organization_id', organizationId)
+    
+    if (error) {
+      console.error('Error deleting page:', error)
+      return NextResponse.json({ error: 'Failed to delete page' }, { status: 500 })
+    }
+    
+    return NextResponse.json({ success: true })
+    
+  } catch (error) {
+    console.error('Error in DELETE handler:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
