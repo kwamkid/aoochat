@@ -38,6 +38,18 @@ export class OrganizationService {
     // If RPC fails, fallback to direct query
     console.log('RPC failed, trying direct query. Error:', rpcError)
     
+    // Define the expected type for the query result
+    type MemberWithOrg = {
+      organization_id: string
+      user_role: string
+      is_default: boolean
+      joined_at: string
+      organization: {
+        name: string
+        slug: string
+      } | null
+    }
+    
     const { data, error } = await this.supabase
       .from('organization_members')
       .select(`
@@ -45,13 +57,14 @@ export class OrganizationService {
         user_role: role,
         is_default,
         joined_at,
-        organization:organizations(
+        organization:organizations!inner(
           name,
           slug
         )
       `)
       .eq('user_id', user.id)
       .eq('is_active', true)
+      .returns<MemberWithOrg[]>()
 
     if (error) {
       console.error('Direct query also failed:', error)
@@ -63,7 +76,7 @@ export class OrganizationService {
       organization_id: item.organization_id,
       organization_name: item.organization?.name || 'Unknown',
       organization_slug: item.organization?.slug || 'unknown',
-      user_role: item.user_role || 'member',
+      user_role: (item.user_role || 'member') as OrganizationRole,
       is_default: item.is_default || false,
       joined_at: item.joined_at || new Date().toISOString()
     }))

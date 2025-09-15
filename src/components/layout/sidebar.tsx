@@ -4,7 +4,6 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { motion, AnimatePresence } from "framer-motion"
 import { 
   MessageCircle, 
   Users, 
@@ -14,8 +13,6 @@ import {
   Zap,
   Menu,
   X,
-  ChevronDown,
-  ChevronRight,
   Bell,
   Plus,
   Circle,
@@ -82,7 +79,7 @@ const navigationItems: NavigationSection[] = [
         name: "การสนทนา",
         href: "/conversations",
         icon: MessageCircle,
-        badge: "12", // จำนวนข้อความใหม่
+        badge: "12",
         badgeType: "error"
       },
       {
@@ -225,9 +222,6 @@ interface SidebarProps {
 export function Sidebar({ className, organization }: SidebarProps) {
   const pathname = usePathname()
   const [isMobileOpen, setIsMobileOpen] = useState(false)
-  const [isPlatformOpen, setIsPlatformOpen] = useState(false)
-  const [isOrgMenuOpen, setIsOrgMenuOpen] = useState(false)
-  const [expandedSections, setExpandedSections] = useState<string[]>(["หลัก"])
   const [mounted, setMounted] = useState(false)
   
   // Create a safe wrapper for the organization context
@@ -235,7 +229,6 @@ export function Sidebar({ className, organization }: SidebarProps) {
     try {
       return useOrganization()
     } catch {
-      // Return default values if context is not available
       return {
         currentOrganization: null,
         currentMember: null,
@@ -251,7 +244,6 @@ export function Sidebar({ className, organization }: SidebarProps) {
     }
   }
   
-  // Always call the hook at the top level
   const orgContext = useSafeOrganization()
   const hasPermission = orgContext?.hasPermission || (() => true)
 
@@ -259,18 +251,6 @@ export function Sidebar({ className, organization }: SidebarProps) {
   useEffect(() => {
     setMounted(true)
   }, [])
-
-  // Auto-expand section if current path is in it
-  useEffect(() => {
-    if (!mounted) return
-    
-    navigationItems.forEach(section => {
-      const hasActiveItem = section.items.some(item => pathname.startsWith(item.href))
-      if (hasActiveItem && !expandedSections.includes(section.title)) {
-        setExpandedSections(prev => [...prev, section.title])
-      }
-    })
-  }, [pathname, mounted])
 
   // Close mobile sidebar when route changes
   useEffect(() => {
@@ -288,14 +268,6 @@ export function Sidebar({ className, organization }: SidebarProps) {
       document.body.style.overflow = 'unset'
     }
   }, [isMobileOpen])
-
-  const toggleSection = (sectionTitle: string) => {
-    setExpandedSections(prev => 
-      prev.includes(sectionTitle) 
-        ? prev.filter(t => t !== sectionTitle)
-        : [...prev, sectionTitle]
-    )
-  }
 
   const SidebarContent = () => (
     <>
@@ -317,221 +289,143 @@ export function Sidebar({ className, organization }: SidebarProps) {
         </button>
       </div>
 
-      {/* Organization Selector */}
+      {/* Organization Info */}
       <div className="px-4 py-3 border-b">
-        <button
-          onClick={() => setIsOrgMenuOpen(!isOrgMenuOpen)}
-          className="w-full flex items-center justify-between p-2 hover:bg-muted rounded-lg transition-colors"
+        <Link
+          href="/organizations"
+          className="flex items-center gap-2 p-2 hover:bg-muted rounded-lg transition-colors"
         >
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-brand-100 dark:bg-brand-900/30 rounded-lg flex items-center justify-center">
-              <Building className="w-5 h-5 text-brand-600 dark:text-brand-400" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-medium truncate max-w-[140px]">
-                {organization?.name || 'Select Organization'}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {organization?.subscription_plan || 'Free'} Plan
-              </p>
-            </div>
+          <div className="w-8 h-8 bg-brand-100 dark:bg-brand-900/30 rounded-lg flex items-center justify-center">
+            <Building className="w-5 h-5 text-brand-600 dark:text-brand-400" />
           </div>
-          <ChevronDown className={cn(
-            "w-4 h-4 text-muted-foreground transition-transform",
-            isOrgMenuOpen && "rotate-180"
-          )} />
-        </button>
-        
-        <AnimatePresence>
-          {isOrgMenuOpen && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="mt-2 space-y-1 overflow-hidden"
-            >
-              <Link 
-                href="/organizations"
-                className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors flex items-center gap-2"
-              >
-                <Building className="w-3 h-3" />
-                เปลี่ยนองค์กร
-              </Link>
-              <Link 
-                href="/settings/organization"
-                className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors flex items-center gap-2"
-              >
-                <Settings className="w-3 h-3" />
-                ตั้งค่าองค์กร
-              </Link>
-              <Link
-                href="/settings/members"
-                className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors flex items-center gap-2"
-              >
-                <UserPlus className="w-3 h-3" />
-                จัดการสมาชิก
-              </Link>
-            </motion.div>
-          )}
-        </AnimatePresence>
+          <div className="flex-1">
+            <p className="text-sm font-medium truncate">
+              {organization?.name || 'Select Organization'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {organization?.subscription_plan || 'Free'} Plan
+            </p>
+          </div>
+        </Link>
       </div>
 
-      {/* Navigation */}
+      {/* Navigation - All sections visible */}
       <nav className="flex-1 px-4 py-4 space-y-6 overflow-y-auto">
         {navigationItems.map((section) => {
-          const isExpanded = expandedSections.includes(section.title)
+          // Filter items based on permissions
+          const visibleItems = section.items.filter(item => 
+            !item.permission || hasPermission(item.permission)
+          )
+          
+          if (visibleItems.length === 0) return null
           
           return (
             <div key={section.title}>
-              <button
-                onClick={() => toggleSection(section.title)}
-                className="w-full flex items-center justify-between px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
-              >
-                <span>{section.title}</span>
-                <ChevronRight className={cn(
-                  "w-3 h-3 transition-transform",
-                  isExpanded && "rotate-90"
-                )} />
-              </button>
+              <p className="px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {section.title}
+              </p>
               
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="mt-2 space-y-1 overflow-hidden"
-                  >
-                    {section.items.map((item) => {
-                      const isActive = pathname === item.href || 
-                                      (item.href !== '/settings' && pathname.startsWith(item.href))
-                      
-                      // Check permission if specified
-                      if (item.permission && !hasPermission(item.permission)) {
-                        return null
-                      }
-                      
-                      return (
-                        <Link
-                          key={item.href}
-                          href={item.href}
-                          className={cn(
-                            "flex items-center justify-between px-3 py-2 rounded-lg transition-all group",
-                            isActive
-                              ? "bg-brand-50 dark:bg-brand-950/30 text-brand-600 dark:text-brand-400"
-                              : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          <div className="flex items-center gap-3">
-                            <item.icon className="w-4 h-4" />
-                            <div>
-                              <span className="text-sm font-medium">{item.name}</span>
-                              {item.description && (
-                                <p className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {item.description}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          {item.badge && (
-                            <span className={cn(
-                              "px-2 py-0.5 text-xs font-medium rounded-full",
-                              item.badgeType === "error" 
-                                ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-                                : item.badgeType === "info"
-                                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                                : item.badgeType === "success"
-                                ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400"
-                                : "bg-muted text-muted-foreground"
-                            )}>
-                              {item.badge}
-                            </span>
-                          )}
-                        </Link>
-                      )
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <div className="mt-2 space-y-1">
+                {visibleItems.map((item) => {
+                  const isActive = pathname === item.href || 
+                                  (item.href !== '/settings' && pathname.startsWith(item.href))
+                  
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={cn(
+                        "flex items-center justify-between px-3 py-2 rounded-lg transition-all group",
+                        isActive
+                          ? "bg-brand-50 dark:bg-brand-950/30 text-brand-600 dark:text-brand-400"
+                          : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <item.icon className="w-4 h-4" />
+                        <span className="text-sm font-medium">{item.name}</span>
+                      </div>
+                      {item.badge && (
+                        <span className={cn(
+                          "px-2 py-0.5 text-xs font-medium rounded-full",
+                          item.badgeType === "error" 
+                            ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+                            : item.badgeType === "info"
+                            ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                            : item.badgeType === "success"
+                            ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400"
+                            : "bg-muted text-muted-foreground"
+                        )}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </Link>
+                  )
+                })}
+              </div>
             </div>
           )
         })}
 
-        {/* Quick Platform Status */}
+        {/* Platform Status Section */}
         <div>
-          <button
-            onClick={() => setIsPlatformOpen(!isPlatformOpen)}
-            className="w-full flex items-center justify-between px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
-          >
-            <span>สถานะแพลตฟอร์ม</span>
-            <ChevronRight className={cn(
-              "w-3 h-3 transition-transform",
-              isPlatformOpen && "rotate-90"
-            )} />
-          </button>
+          <p className="px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            สถานะแพลตฟอร์ม
+          </p>
           
-          <AnimatePresence>
-            {isPlatformOpen && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="mt-2 space-y-1 overflow-hidden"
+          <div className="mt-2 space-y-1">
+            {platformConnections.map((platform) => (
+              <div
+                key={platform.id}
+                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-muted transition-colors group cursor-default"
               >
-                {platformConnections.map((platform) => (
-                  <div
-                    key={platform.id}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-muted transition-colors group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center",
-                        platform.status === "connected" 
-                          ? "bg-green-100 dark:bg-green-900/30"
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "w-7 h-7 rounded-lg flex items-center justify-center",
+                    platform.status === "connected" 
+                      ? "bg-green-100 dark:bg-green-900/30"
+                      : platform.status === "pending"
+                      ? "bg-yellow-100 dark:bg-yellow-900/30"
+                      : "bg-gray-100 dark:bg-gray-900/30"
+                  )}>
+                    <PlatformIcon 
+                      platform={platform.id} 
+                      className={cn(
+                        "w-4 h-4",
+                        platform.status === "connected"
+                          ? "text-green-600 dark:text-green-400"
                           : platform.status === "pending"
-                          ? "bg-yellow-100 dark:bg-yellow-900/30"
-                          : "bg-gray-100 dark:bg-gray-900/30"
-                      )}>
-                        <PlatformIcon 
-                          platform={platform.id} 
-                          className={cn(
-                            "w-4 h-4",
-                            platform.status === "connected"
-                              ? "text-green-600 dark:text-green-400"
-                              : platform.status === "pending"
-                              ? "text-yellow-600 dark:text-yellow-400"
-                              : "text-gray-400"
-                          )}
-                        />
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium">{platform.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {platform.status === "connected" 
-                            ? `${platform.accounts} เพจ`
-                            : platform.status === "pending"
-                            ? "รอการอนุมัติ"
-                            : "ยังไม่เชื่อมต่อ"
-                          }
-                        </p>
-                      </div>
-                    </div>
-                    {platform.status === "connected" && (
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                    )}
+                          ? "text-yellow-600 dark:text-yellow-400"
+                          : "text-gray-400"
+                      )}
+                    />
                   </div>
-                ))}
-                
-                <Link 
-                  href="/settings/platforms"
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 rounded-lg transition-colors"
-                >
-                  <Settings className="w-4 h-4" />
-                  จัดการการเชื่อมต่อ
-                </Link>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <div>
+                    <p className="text-xs font-medium">{platform.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {platform.status === "connected" 
+                        ? `${platform.accounts} เพจ`
+                        : platform.status === "pending"
+                        ? "รอการอนุมัติ"
+                        : "ยังไม่เชื่อมต่อ"
+                      }
+                    </p>
+                  </div>
+                </div>
+                {platform.status === "connected" && (
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                )}
+              </div>
+            ))}
+            
+            <Link 
+              href="/settings/platforms"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 rounded-lg transition-colors"
+            >
+              <Settings className="w-4 h-4" />
+              จัดการการเชื่อมต่อ
+            </Link>
+          </div>
         </div>
       </nav>
 
@@ -575,28 +469,20 @@ export function Sidebar({ className, organization }: SidebarProps) {
       </button>
 
       {/* Mobile Sidebar Overlay */}
-      <AnimatePresence>
-        {isMobileOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 0.5 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsMobileOpen(false)}
-              className="lg:hidden fixed inset-0 bg-black z-40"
-            />
-            <motion.div
-              initial={{ x: "-100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "-100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-card border-r shadow-xl flex flex-col"
-            >
-              <SidebarContent />
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      {isMobileOpen && (
+        <>
+          <div
+            onClick={() => setIsMobileOpen(false)}
+            className="lg:hidden fixed inset-0 bg-black/50 z-40 transition-opacity duration-200"
+          />
+          <div className={cn(
+            "lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-card border-r shadow-xl flex flex-col transition-transform duration-300",
+            isMobileOpen ? "translate-x-0" : "-translate-x-full"
+          )}>
+            <SidebarContent />
+          </div>
+        </>
+      )}
 
       {/* Desktop Sidebar */}
       <div className={cn(

@@ -75,7 +75,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       const { data: { user } } = await supabase.auth.getUser()
       
       if (!user) {
-        // Not logged in
+        // Not logged in - only redirect if on protected page
         if (requiresOrganization) {
           router.push('/login')
         }
@@ -85,16 +85,17 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       
       setUser(user)
       
-      // Skip organization loading for public paths
+      // Always load organizations list
+      const orgs = await organizationService.getUserOrganizations()
+      setUserOrganizations(orgs)
+      
+      // Skip organization context loading for public paths
       if (!requiresOrganization) {
         setLoading(false)
         return
       }
       
-      // Load user's organizations
-      const orgs = await organizationService.getUserOrganizations()
-      setUserOrganizations(orgs)
-      
+      // For protected pages, try to load organization context
       // Check for stored organization ID
       const storedOrgId = localStorage.getItem('current_organization_id')
       
@@ -113,7 +114,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       if (targetOrgId) {
         await loadOrganization(targetOrgId)
       } else {
-        // No organizations found
+        // No organizations found - redirect to organizations page to create one
         console.log('No organizations found, redirecting to organizations page')
         router.push('/organizations')
       }
@@ -223,10 +224,8 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     }
     
     // Check role-based permissions
-    // Import DEFAULT_PERMISSIONS from types
-    const { DEFAULT_PERMISSIONS } = require('@/types/organization.types')
-    const rolePermissions = DEFAULT_PERMISSIONS[currentMember.role]
-    return rolePermissions?.[permission] || false
+    const rolePermissions = DEFAULT_PERMISSIONS[currentMember.role as OrganizationRole]
+    return rolePermissions?.[permission as keyof OrganizationPermissions] || false
   }
 
   // Listen for auth state changes

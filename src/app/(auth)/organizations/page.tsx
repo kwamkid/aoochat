@@ -49,9 +49,9 @@ export default function OrganizationsPage() {
       setOrganizations(orgs)
 
       // If user has only one org and it's default, auto-select it
-      if (orgs.length === 1 && orgs[0].is_default) {
-        await selectOrganization(orgs[0].organization_id)
-      }
+      // if (orgs.length === 1 && orgs[0].is_default) {
+      //   await selectOrganization(orgs[0].organization_id)
+      // }
     } catch (error) {
       console.error("Error loading organizations:", error)
       toast.error("Failed to load organizations")

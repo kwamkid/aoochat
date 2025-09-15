@@ -27,6 +27,19 @@
     --input: 0 0% 89.8%;
     --ring: 0 72.2% 50.6%;
     --radius: 0.5rem;
+
+    /* Brand colors */
+    --brand-50: 219 100% 97%;
+    --brand-100: 219 94% 94%;
+    --brand-200: 218 89% 85%;
+    --brand-300: 217 84% 71%;
+    --brand-400: 215 76% 54%;
+    --brand-500: 213 94% 43%;
+    --brand-600: 212 100% 35%;
+    --brand-700: 211 100% 28%;
+    --brand-800: 209 100% 23%;
+    --brand-900: 206 96% 19%;
+    --brand-950: 204 100% 11%;
   }
 
   .dark {
@@ -63,4 +76,23 @@
     font-size: 16px;
     line-height: 1.5;
   }
+}
+
+/* Sidebar smooth slide animations */
+.sidebar-section {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-section-open {
+  max-height: 1000px;
+}
+
+.sidebar-chevron {
+  transition: transform 0.3s ease;
+}
+
+.sidebar-chevron-open {
+  transform: rotate(90deg);
 }
