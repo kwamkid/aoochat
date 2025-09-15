@@ -44,10 +44,19 @@ export default function ConversationsPage() {
   const {
     sending,
     sendMessage,
-    sendTypingIndicator,
     markAsRead,
     deleteMessage
-  } = useMessageService(selectedConversation)
+  } = useMessageService({
+    conversationId: selectedConversation?.id,
+    platform: selectedConversation?.platform,
+    onMessageSent: (message: Message) => {
+      console.log('Message sent successfully:', message)
+    },
+    onMessageFailed: (error: Error) => {
+      console.error('Failed to send message:', error)
+      toast.error('Failed to send message')
+    }
+  })
 
   // Helper function to play notification sound
   const playNotificationSound = useCallback(() => {
@@ -174,7 +183,9 @@ export default function ConversationsPage() {
     if (selectedConversation) {
       safeExecute(() => {
         // Mark as read
-        markAsRead()
+        if (selectedConversation.unread_count > 0) {
+          conversationPollingService.markAsRead(selectedConversation.id)
+        }
         
         if (isMobileView) {
           setShowMobileChat(true)
@@ -184,7 +195,7 @@ export default function ConversationsPage() {
         setTimeout(() => scrollToBottom(true), 100)
       }, 'Handle conversation selection')
     }
-  }, [selectedConversation, isMobileView, scrollToBottom, markAsRead])
+  }, [selectedConversation, isMobileView, scrollToBottom])
 
   // Scroll to bottom when messages load
   useEffect(() => {
@@ -353,6 +364,7 @@ export default function ConversationsPage() {
             conversation={selectedConversation}
             messages={messages}
             onSendMessage={handleSendMessage}
+            onResendMessage={(message) => handleSendMessage(message.content.text || '', message.id)}
             onLoadMore={loadMoreMessages}
             loading={messagesLoadingMore}
             hasMore={hasMoreMessages}

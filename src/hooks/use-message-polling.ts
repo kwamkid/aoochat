@@ -173,6 +173,7 @@ export function useMessagePolling({
 
   // Add message manually (for optimistic updates)
   const addMessage = useCallback((message: Message) => {
+    // Check if message already exists
     if (!messageIdsSetRef.current.has(message.id)) {
       messageIdsSetRef.current.add(message.id)
       setMessages(prev => [...prev, message])
@@ -181,6 +182,9 @@ export function useMessagePolling({
       if (!message.id.startsWith('temp-')) {
         lastMessageIdRef.current = message.id
       }
+      
+      // Update offset for pagination
+      setOffset(prev => prev + 1)
     }
   }, [])
 

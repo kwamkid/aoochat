@@ -39,10 +39,15 @@ import { th } from "date-fns/locale"
 import type { Conversation, Message, MessageType, SenderType } from "@/types/conversation.types"
 
 // Message Status Icon
-const MessageStatus = ({ status }: { status: Message['status'] }) => {
+const MessageStatus = ({ status, onRetry }: { status: Message['status']; onRetry?: () => void }) => {
   switch (status) {
     case 'sending':
-      return <Clock className="w-3 h-3 text-muted-foreground" />
+      return (
+        <div className="flex items-center gap-1">
+          <Clock className="w-3 h-3 text-muted-foreground animate-pulse" />
+          <span className="text-xs text-muted-foreground">Sending...</span>
+        </div>
+      )
     case 'sent':
       return <Check className="w-3 h-3 text-muted-foreground" />
     case 'delivered':
@@ -50,7 +55,20 @@ const MessageStatus = ({ status }: { status: Message['status'] }) => {
     case 'read':
       return <CheckCheck className="w-3 h-3 text-blue-500" />
     case 'failed':
-      return <AlertCircle className="w-3 h-3 text-red-500" />
+      return (
+        <div className="flex items-center gap-1">
+          <AlertCircle className="w-3 h-3 text-red-500" />
+          <span className="text-xs text-red-500">Failed</span>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="text-xs text-red-500 underline hover:text-red-600 ml-1"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )
     default:
       return null
   }
@@ -74,6 +92,7 @@ interface ChatViewProps {
   conversation: Conversation | null
   messages: Message[]
   onSendMessage: (content: string, type?: MessageType) => void
+  onResendMessage?: (message: Message) => void
   onLoadMore?: () => void
   loading?: boolean
   hasMore?: boolean
@@ -89,6 +108,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   conversation,
   messages,
   onSendMessage,
+  onResendMessage,
   onLoadMore,
   loading = false,
   hasMore = false,
@@ -354,6 +374,11 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
                       : [...prev, message.id]
                   )
                 }}
+                onRetry={() => {
+                  if (message.status === 'failed' && onResendMessage) {
+                    onResendMessage(message)
+                  }
+                }}
               />
             ))}
           </div>
@@ -567,19 +592,24 @@ function MessageBubble({
   isOwn,
   showAvatar,
   isSelected,
-  onSelect
+  onSelect,
+  onRetry
 }: {
   message: Message
   isOwn: boolean
   showAvatar: boolean
   isSelected: boolean
   onSelect: () => void
+  onRetry?: () => void
 }) {
   const renderMessageContent = () => {
     switch (message.message_type) {
       case 'text':
         return (
-          <p className="whitespace-pre-wrap break-words">
+          <p className={cn(
+            "whitespace-pre-wrap break-words",
+            message.status === 'failed' && "opacity-75"
+          )}>
             {message.content.text}
           </p>
         )
@@ -589,7 +619,10 @@ function MessageBubble({
             <img 
               src={message.content.media_url} 
               alt="Image"
-              className="rounded-lg max-w-xs cursor-pointer hover:opacity-90 transition-opacity"
+              className={cn(
+                "rounded-lg max-w-xs cursor-pointer hover:opacity-90 transition-opacity",
+                message.status === 'failed' && "opacity-75"
+              )}
             />
             {message.content.text && (
               <p className="mt-2">{message.content.text}</p>
@@ -598,7 +631,10 @@ function MessageBubble({
         )
       case 'file':
         return (
-          <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+          <div className={cn(
+            "flex items-center gap-3 p-3 bg-muted/50 rounded-lg",
+            message.status === 'failed' && "opacity-75"
+          )}>
             <FileText className="w-8 h-8 text-muted-foreground" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">
@@ -643,9 +679,11 @@ function MessageBubble({
         isOwn ? "items-end" : "items-start"
       )}>
         <div className={cn(
-          "px-4 py-2 rounded-2xl",
+          "px-4 py-2 rounded-2xl relative",
           isOwn 
-            ? "bg-brand-500 text-white" 
+            ? message.status === 'failed' 
+              ? "bg-red-500/20 text-red-900 dark:text-red-100 border border-red-300 dark:border-red-700"
+              : "bg-brand-500 text-white" 
             : "bg-muted",
           message.is_private && "bg-yellow-100 dark:bg-yellow-900/30 border-2 border-yellow-300 dark:border-yellow-700"
         )}>
@@ -679,7 +717,7 @@ function MessageBubble({
           {message.sender_type !== 'customer' && (
             <SenderIcon type={message.sender_type} />
           )}
-          {isOwn && <MessageStatus status={message.status} />}
+          {isOwn && <MessageStatus status={message.status} onRetry={onRetry} />}
           {message.is_automated && (
             <Bot className="w-3 h-3 text-muted-foreground" />
           )}

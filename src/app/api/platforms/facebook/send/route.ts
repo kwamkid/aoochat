@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
       .single()
     
     if (convError || !conversation) {
+      console.error('Conversation not found:', convError)
       return NextResponse.json(
         { error: 'Conversation not found' },
         { status: 404 }
@@ -37,13 +38,44 @@ export async function POST(request: NextRequest) {
     // Extract Facebook user ID from platform_conversation_id
     // Format: pageId_userId
     const parts = conversation.platform_conversation_id.split('_')
+    const pageId = parts[0]
     const recipientId = parts[parts.length - 1]
     
-    if (!recipientId) {
+    if (!recipientId || !pageId) {
+      console.error('Invalid conversation ID format:', conversation.platform_conversation_id)
       return NextResponse.json(
         { error: 'Invalid conversation ID format' },
         { status: 400 }
       )
+    }
+    
+    console.log('Page ID:', pageId, 'Recipient ID:', recipientId)
+    
+    // Get page access token from database
+    const { data: pageAccount, error: pageError } = await supabase
+      .from('platform_accounts')
+      .select('access_token')
+      .eq('platform', 'facebook')
+      .eq('account_id', pageId)
+      .single()
+    
+    if (pageError || !pageAccount?.access_token) {
+      console.error('Page access token not found in database, trying environment variable')
+      
+      // Fallback to environment variable if available
+      const envToken = process.env.FACEBOOK_PAGE_ACCESS_TOKEN
+      if (!envToken) {
+        return NextResponse.json(
+          { error: 'Page access token not found. Please reconnect Facebook.' },
+          { status: 401 }
+        )
+      }
+      
+      console.log('Using access token from environment variable')
+      facebookAPIClient.setPageAccessToken(envToken)
+    } else {
+      // Set the page access token from database
+      facebookAPIClient.setPageAccessToken(pageAccount.access_token)
     }
     
     // Build message based on type
@@ -82,25 +114,43 @@ export async function POST(request: NextRequest) {
     }
     
     // Send typing indicator first
-    await facebookAPIClient.sendTypingIndicator(recipientId, true)
+    try {
+      await facebookAPIClient.sendTypingIndicator(recipientId, true)
+    } catch (e) {
+      console.log('Could not send typing indicator:', e)
+    }
     
     // Handle array of messages (e.g., caption + image)
     const results = []
     if (Array.isArray(fbMessage)) {
       for (const msg of fbMessage) {
-        const result = await facebookAPIClient.sendMessage(recipientId, msg)
-        results.push(result)
-        
-        // Small delay between messages
-        await new Promise(resolve => setTimeout(resolve, 500))
+        try {
+          const result = await facebookAPIClient.sendMessage(recipientId, msg)
+          results.push(result)
+          
+          // Small delay between messages
+          await new Promise(resolve => setTimeout(resolve, 500))
+        } catch (error) {
+          console.error('Error sending individual message:', error)
+          throw error
+        }
       }
     } else {
-      const result = await facebookAPIClient.sendMessage(recipientId, fbMessage)
-      results.push(result)
+      try {
+        const result = await facebookAPIClient.sendMessage(recipientId, fbMessage)
+        results.push(result)
+      } catch (error) {
+        console.error('Error sending message:', error)
+        throw error
+      }
     }
     
     // Turn off typing indicator
-    await facebookAPIClient.sendTypingIndicator(recipientId, false)
+    try {
+      await facebookAPIClient.sendTypingIndicator(recipientId, false)
+    } catch (e) {
+      console.log('Could not turn off typing indicator:', e)
+    }
     
     // Store message in database
     const messageData = {
