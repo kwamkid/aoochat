@@ -51,15 +51,19 @@ export function useMessagePolling({
       messageIdsSetRef.current.clear()
       tempMessageMapRef.current.clear()
       
-      const uniqueMessages = data.filter(msg => {
-        if (messageIdsSetRef.current.has(msg.id)) {
-          return false
-        }
-        messageIdsSetRef.current.add(msg.id)
-        return true
-      })
+      // Remove duplicates before setting
+      const uniqueMessages: Message[] = []
+      const seenIds = new Set<string>()
       
-      console.log(`[loadMessages] Loaded ${uniqueMessages.length} messages`)
+      for (const msg of data) {
+        if (!seenIds.has(msg.id)) {
+          seenIds.add(msg.id)
+          messageIdsSetRef.current.add(msg.id)
+          uniqueMessages.push(msg)
+        }
+      }
+      
+      console.log(`[loadMessages] Loaded ${uniqueMessages.length} unique messages`)
       setMessages(uniqueMessages)
       setOffset(uniqueMessages.length)
       setHasMore(uniqueMessages.length >= initialLimit)
@@ -95,16 +99,25 @@ export function useMessagePolling({
         offset
       )
       
-      const uniqueOlderMessages = olderMessages.filter(msg => {
-        if (messageIdsSetRef.current.has(msg.id)) {
-          return false
+      // Filter out duplicates
+      const uniqueOlderMessages: Message[] = []
+      
+      for (const msg of olderMessages) {
+        if (!messageIdsSetRef.current.has(msg.id)) {
+          messageIdsSetRef.current.add(msg.id)
+          uniqueOlderMessages.push(msg)
+        } else {
+          console.log(`[loadMoreMessages] Skipping duplicate: ${msg.id}`)
         }
-        messageIdsSetRef.current.add(msg.id)
-        return true
-      })
+      }
       
       if (uniqueOlderMessages.length > 0) {
-        setMessages(prev => [...uniqueOlderMessages, ...prev])
+        setMessages(prev => {
+          // Final check to prevent duplicates in state
+          const existingIds = new Set(prev.map(m => m.id))
+          const filtered = uniqueOlderMessages.filter(m => !existingIds.has(m.id))
+          return [...filtered, ...prev]
+        })
         setOffset(prev => prev + uniqueOlderMessages.length)
       }
       
@@ -153,7 +166,7 @@ export function useMessagePolling({
               return
             }
             
-            // For agent messages, try to replace temp message
+            // For agent messages, try to silently update temp message
             if (newMsg.sender_type === 'agent') {
               const tempIndex = updatedMessages.findIndex(msg => {
                 if (!msg.id.startsWith('temp-')) return false
@@ -170,8 +183,15 @@ export function useMessagePolling({
               
               if (tempIndex !== -1) {
                 const tempId = updatedMessages[tempIndex].id
-                console.log(`[pollNewMessages] Replacing temp ${tempId} with ${newMsg.id}`)
-                updatedMessages[tempIndex] = newMsg
+                console.log(`[pollNewMessages] Silently updating temp ${tempId} with ${newMsg.id}`)
+                // Silently update the message object instead of replacing
+                updatedMessages[tempIndex] = {
+                  ...updatedMessages[tempIndex],
+                  id: newMsg.id,
+                  status: newMsg.status,
+                  created_at: newMsg.created_at,
+                  updated_at: newMsg.updated_at
+                }
                 messageIdsSetRef.current.delete(tempId)
                 messageIdsSetRef.current.add(newMsg.id)
                 tempMessageMapRef.current.set(tempId, newMsg.id)
@@ -207,22 +227,41 @@ export function useMessagePolling({
 
   // Add optimistic message
   const addMessage = useCallback((message: Message) => {
-    console.log(`[addMessage] Adding optimistic: ${message.id}`)
+    console.log(`[addMessage] Adding message: ${message.id}`)
     
+    // Check if message already exists
     if (messageIdsSetRef.current.has(message.id)) {
+      console.log(`[addMessage] Message ${message.id} already exists, skipping`)
       return
     }
     
     messageIdsSetRef.current.add(message.id)
-    setMessages(prev => [...prev, message])
+    
+    setMessages(prev => {
+      // Double check in state to prevent duplicates
+      const exists = prev.some(m => m.id === message.id)
+      if (exists) {
+        console.log(`[addMessage] Message ${message.id} already in state, skipping`)
+        return prev
+      }
+      return [...prev, message]
+    })
+    
     setOffset(prev => prev + 1)
   }, [])
 
-  // Replace temp message with real one
+  // Replace temp message with real one (smooth update without flicker)
   const replaceMessage = useCallback((tempId: string, realMessage: Message) => {
-    console.log(`[replaceMessage] Replacing ${tempId} with ${realMessage.id}`)
+    console.log(`[replaceMessage] Updating ${tempId} to ${realMessage.id}`)
     
     setMessages(prev => {
+      // Check if real message already exists (prevent duplicates)
+      if (prev.some(m => m.id === realMessage.id && m.id !== tempId)) {
+        console.log(`[replaceMessage] Real message ${realMessage.id} already exists, removing temp only`)
+        // Just remove the temp message
+        return prev.filter(m => m.id !== tempId)
+      }
+      
       const tempIndex = prev.findIndex(msg => msg.id === tempId)
       
       if (tempIndex === -1) {
@@ -237,10 +276,17 @@ export function useMessagePolling({
         return prev
       }
       
-      // Replace temp with real
+      // Smooth update - preserve the position and just update properties
       const newMessages = [...prev]
-      newMessages[tempIndex] = realMessage
+      // Keep the same object reference but update properties to avoid re-render flicker
+      newMessages[tempIndex] = {
+        ...newMessages[tempIndex],
+        ...realMessage,
+        // Smooth transition by keeping the same rendered content
+        content: realMessage.content || newMessages[tempIndex].content
+      }
       
+      // Update tracking
       messageIdsSetRef.current.delete(tempId)
       messageIdsSetRef.current.add(realMessage.id)
       tempMessageMapRef.current.set(tempId, realMessage.id)

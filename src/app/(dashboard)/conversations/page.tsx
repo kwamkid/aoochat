@@ -148,8 +148,11 @@ export default function ConversationsPage() {
   })
 
   // ✨ NEW: Use Realtime for instant updates
-  // Realtime สำหรับ conversation ที่เลือก
-  useConversationRealtime(selectedConversation?.id || null, { // แก้ไขตรงนี้: เพิ่ม || null
+  // src/app/(dashboard)/conversations/page.tsx - Realtime hooks section
+// (ใส่ code นี้แทนที่ส่วน realtime hooks เดิม)
+
+  // ✨ Realtime สำหรับ conversation ที่เลือก
+  useConversationRealtime(selectedConversation?.id || null, {
     onNewMessage: (message) => {
       safeExecute(() => {
         console.log('[Realtime] New message received:', message)
@@ -161,31 +164,36 @@ export default function ConversationsPage() {
           addMessage(message)
           
           // Update conversation
-          updateConversation(selectedConversation!.id, {
-            last_message: message,
-            last_message_at: message.created_at,
-            message_count: (selectedConversation?.message_count || 0) + 1,
-            unread_count: message.sender_type === 'customer' 
-              ? (selectedConversation?.unread_count || 0) + 1 
-              : 0
-          })
-          
-          // Move to top if customer message
-          if (message.sender_type === 'customer') {
-            moveToTop(selectedConversation!.id)
-            playNotificationSound()
+          if (selectedConversation) {
+            updateConversation(selectedConversation.id, {
+              last_message: message,
+              last_message_at: message.created_at,
+              message_count: (selectedConversation.message_count || 0) + 1,
+              unread_count: message.sender_type === 'customer' 
+                ? (selectedConversation.unread_count || 0) + 1 
+                : 0
+            })
             
-            // Auto scroll if near bottom
-            if (isNearBottom()) {
-              setTimeout(() => scrollToBottom(), 100)
+            // Move to top if customer message
+            if (message.sender_type === 'customer') {
+              moveToTop(selectedConversation.id)
+              playNotificationSound()
+              
+              // Auto scroll if near bottom
+              if (isNearBottom()) {
+                setTimeout(() => scrollToBottom(), 100)
+              }
             }
           }
+        } else {
+          console.log('[Realtime] Message already exists, skipping:', message.id)
         }
       }, 'Realtime onNewMessage')
     },
     onMessageUpdate: (message) => {
       safeExecute(() => {
         console.log('[Realtime] Message updated:', message)
+        // Smooth update without flicker
         replaceMessage(message.id, message)
       }, 'Realtime onMessageUpdate')
     },
@@ -198,7 +206,7 @@ export default function ConversationsPage() {
     enabled: !!selectedConversation
   })
 
-  // ✨ NEW: Global realtime for all conversations (สำหรับ conversation list)
+  // ✨ Global realtime for all conversations (สำหรับ conversation list)
   useSupabaseRealtime({
     onConversationUpdate: (conversationData) => {
       safeExecute(() => {

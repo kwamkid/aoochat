@@ -26,6 +26,8 @@ import { cn } from "@/lib/utils"
 import { format, formatDistanceToNow } from "date-fns"
 import { th } from "date-fns/locale"
 import type { Conversation, Platform, ConversationStatus, Priority } from "@/types/conversation.types"
+import { ConversationAvatar } from './platform-avatar'
+import { usePlatformInfo } from '@/hooks/use-platform-info'
 
 // Platform Icons
 const PlatformIcon = ({ platform, className }: { platform: Platform; className?: string }) => {
@@ -271,6 +273,16 @@ function ConversationItem({
     addSuffix: true,
     locale: th 
   })
+  
+  // Extract page ID from platform_conversation_id
+  const pageId = conversation.platform_conversation_id?.split('_')[0]
+  
+  // Get platform info
+  const { pageInfo } = usePlatformInfo({
+    platform: conversation.platform,
+    pageId: pageId || null,
+    customerId: conversation.customer.platform_identities[conversation.platform]?.id || null
+  })
 
   return (
     <motion.button
@@ -285,25 +297,17 @@ function ConversationItem({
       whileHover={{ x: 2 }}
       whileTap={{ scale: 0.98 }}
     >
-      {/* Avatar with Platform Badge */}
+      {/* Enhanced Avatar with Page and Platform */}
       <div className="relative flex-shrink-0">
-        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white font-medium">
-          {conversation.customer.avatar_url ? (
-            <img 
-              src={conversation.customer.avatar_url} 
-              alt={conversation.customer.name}
-              className="w-full h-full rounded-full object-cover"
-            />
-          ) : (
-            conversation.customer.name[0]?.toUpperCase()
-          )}
-        </div>
-        <div className={cn(
-          "absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-white",
-          getPlatformColor(conversation.platform)
-        )}>
-          <PlatformIcon platform={conversation.platform} className="w-3 h-3" />
-        </div>
+        <ConversationAvatar
+          platform={conversation.platform}
+          pageAvatar={pageInfo?.pageAvatar}
+          pageName={pageInfo?.pageName}
+          customerAvatar={conversation.customer.avatar_url}
+          customerName={conversation.customer.name}
+          isVerified={pageInfo?.pageVerified}
+          size="md"
+        />
         {hasUnread && (
           <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
         )}

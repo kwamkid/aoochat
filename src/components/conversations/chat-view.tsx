@@ -1,15 +1,13 @@
 // src/components/conversations/chat-view.tsx
 "use client"
 
-import React, { useState, useRef, useEffect, useMemo } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
   Send as SendIcon, 
   Paperclip, 
   Smile, 
   MoreVertical,
-  Phone,
-  Video,
   Info,
   Image,
   FileText,
@@ -21,11 +19,22 @@ import {
   Bot,
   Shield,
   MessageCircle,
-  ArrowDown
+  ArrowDown,
+  CheckCircle,
+  Archive,
+  Trash2,
+  UserPlus,
+  Tag as TagIcon,
+  Flag,
+  Volume2,
+  VolumeX,
+  Clock as ClockIcon
 } from "lucide-react"
 import { cn, formatMessageTime, formatDateSeparator, useDateFormatter } from "@/lib/utils"
 import { format } from "date-fns"
 import type { Conversation, Message, MessageType, SenderType } from "@/types/conversation.types"
+import { ConversationAvatar } from './platform-avatar'
+import { usePlatformInfo, usePlatformTheme } from '@/hooks/use-platform-info'
 
 // Tooltip Component
 const Tooltip = ({ children, content }: { children: React.ReactNode; content: string }) => {
@@ -109,7 +118,22 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   const [selectedMessages, setSelectedMessages] = useState<string[]>([])
   const [isRecording, setIsRecording] = useState(false)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false)
   
+  // Extract page ID for platform info
+  const pageId = conversation?.platform_conversation_id?.split('_')[0]
+  const customerId = conversation?.customer.platform_identities[conversation?.platform || 'facebook']?.id
+  
+  // Get platform info and theme
+  const { pageInfo, customerInfo } = usePlatformInfo({
+    platform: conversation?.platform || 'facebook',
+    pageId: pageId || null,
+    customerId: customerId || null,
+    enabled: !!conversation
+  })
+  
+  const platformTheme = usePlatformTheme(conversation?.platform || 'facebook')
+
   // Use date formatter hook
   const { formatMessage, formatSeparator } = useDateFormatter({ locale: 'th' })
   
@@ -158,6 +182,21 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
     }
   }, [containerRef])
 
+  // Close options menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.options-menu-container')) {
+        setShowOptionsMenu(false)
+      }
+    }
+
+    if (showOptionsMenu) {
+      document.addEventListener('click', handleClickOutside)
+      return () => document.removeEventListener('click', handleClickOutside)
+    }
+  }, [showOptionsMenu])
+
   const scrollToBottom = (force = false) => {
     messagesEndRef.current?.scrollIntoView({ 
       behavior: force ? "auto" : "smooth" 
@@ -189,39 +228,18 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
     return formatMessage(date)
   }
 
-  // Remove duplicate messages and group by date
-  const processedMessages = useMemo(() => {
-    // Remove duplicates by keeping only the last occurrence of each message ID
-    const uniqueMessagesMap = new Map<string, Message>()
-    
-    messages.forEach(message => {
-      uniqueMessagesMap.set(message.id, message)
-    })
-    
-    // Convert back to array and sort by created_at
-    const uniqueMessages = Array.from(uniqueMessagesMap.values()).sort((a, b) => {
-      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    })
-    
-    // Group messages by date
-    const grouped = uniqueMessages.reduce((acc, message) => {
-      const date = format(new Date(message.created_at), 'yyyy-MM-dd')
-      if (!acc[date]) {
-        acc[date] = []
-      }
-      acc[date].push(message)
-      return acc
-    }, {} as Record<string, Message[]>)
-    
-    return grouped
-  }, [messages])
+  // Group messages by date
+  const groupedMessages = messages.reduce((acc, message) => {
+    const date = format(new Date(message.created_at), 'yyyy-MM-dd')
+    if (!acc[date]) {
+      acc[date] = []
+    }
+    acc[date].push(message)
+    return acc
+  }, {} as Record<string, Message[]>)
 
   // Find last agent message
-  const lastAgentMessageId = useMemo(() => {
-    const sortedMessages = Object.values(processedMessages).flat()
-    const lastAgentMsg = [...sortedMessages].reverse().find(m => m.sender_type === 'agent')
-    return lastAgentMsg?.id
-  }, [processedMessages])
+  const lastAgentMessageId = [...messages].reverse().find(m => m.sender_type === 'agent')?.id
 
   if (!conversation) {
     return (
@@ -239,50 +257,122 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
 
   return (
     <div className="flex-1 flex flex-col h-full relative">
-      {/* Chat Header */}
-      <div className="px-6 py-4 border-b bg-card flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white font-medium">
-              {conversation.customer.avatar_url ? (
-                <img 
-                  src={conversation.customer.avatar_url} 
-                  alt={conversation.customer.name}
-                  className="w-full h-full rounded-full object-cover"
-                />
-              ) : (
-                conversation.customer.name[0]?.toUpperCase()
-              )}
+      {/* Simplified Chat Header */}
+      <div className="px-6 py-4 border-b bg-card">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {/* Avatar with Page Logo */}
+            <ConversationAvatar
+              platform={conversation.platform}
+              pageAvatar={pageInfo?.pageAvatar}
+              pageName={pageInfo?.pageName}
+              customerAvatar={customerInfo?.profilePic || conversation.customer.avatar_url}
+              customerName={customerInfo?.name || conversation.customer.name}
+              isVerified={pageInfo?.pageVerified}
+              size="md"
+            />
+            
+            <div>
+              {/* Customer Name */}
+              <h3 className="font-semibold flex items-center gap-2">
+                {customerInfo?.name || conversation.customer.name}
+                {pageInfo?.pageVerified && (
+                  <CheckCircle className="w-4 h-4 text-blue-500" />
+                )}
+              </h3>
+              
+              {/* Simple Status */}
+              <p className="text-sm text-muted-foreground">
+                ใช้งานล่าสุด {formatMessageDate(conversation.customer.last_contact_at)}
+              </p>
             </div>
-            <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-card" />
           </div>
           
-          <div>
-            <h3 className="font-semibold flex items-center gap-2">
-              {conversation.customer.name}
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              ใช้งานล่าสุด {formatMessageDate(conversation.customer.last_contact_at)}
-            </p>
+          <div className="flex items-center gap-2">
+            {/* Customer Info Button */}
+            <Tooltip content="ดูข้อมูลลูกค้า">
+              <button 
+                onClick={() => {
+                  // This will trigger the customer info panel in parent component
+                  const event = new CustomEvent('toggleCustomerInfo')
+                  window.dispatchEvent(event)
+                }}
+                className="p-2 hover:bg-muted rounded-lg transition-colors"
+              >
+                <Info className="w-5 h-5" />
+              </button>
+            </Tooltip>
+            
+            {/* More Options */}
+            <div className="relative options-menu-container">
+              <Tooltip content="ตัวเลือกเพิ่มเติม">
+                <button 
+                  onClick={() => setShowOptionsMenu(!showOptionsMenu)}
+                  className="p-2 hover:bg-muted rounded-lg transition-colors"
+                >
+                  <MoreVertical className="w-5 h-5" />
+                </button>
+              </Tooltip>
+              
+              {/* Options Dropdown Menu */}
+              <AnimatePresence>
+                {showOptionsMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                    className="absolute right-0 top-12 w-56 bg-card border rounded-lg shadow-lg py-1 z-50"
+                  >
+                    {/* Assign Agent */}
+                    <button className="w-full px-4 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-3">
+                      <UserPlus className="w-4 h-4" />
+                      มอบหมายให้เจ้าหน้าที่
+                    </button>
+                    
+                    {/* Add Tags */}
+                    <button className="w-full px-4 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-3">
+                      <TagIcon className="w-4 h-4" />
+                      เพิ่มแท็ก
+                    </button>
+                    
+                    {/* Set Priority */}
+                    <button className="w-full px-4 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-3">
+                      <Flag className="w-4 h-4" />
+                      ตั้งลำดับความสำคัญ
+                    </button>
+                    
+                    {/* Snooze */}
+                    <button className="w-full px-4 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-3">
+                      <ClockIcon className="w-4 h-4" />
+                      เลื่อนการแจ้งเตือน
+                    </button>
+                    
+                    <div className="border-t my-1" />
+                    
+                    {/* Mute/Unmute */}
+                    <button className="w-full px-4 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-3">
+                      <VolumeX className="w-4 h-4" />
+                      ปิดการแจ้งเตือน
+                    </button>
+                    
+                    {/* Archive */}
+                    <button className="w-full px-4 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-3">
+                      <Archive className="w-4 h-4" />
+                      เก็บถาวร
+                    </button>
+                    
+                    <div className="border-t my-1" />
+                    
+                    {/* Delete */}
+                    <button className="w-full px-4 py-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 text-red-600 transition-colors flex items-center gap-3">
+                      <Trash2 className="w-4 h-4" />
+                      ลบการสนทนา
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <div className="text-xs px-2 py-1 bg-muted rounded-full">
-            {conversation.platform}
-          </div>
-          <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-            <Phone className="w-5 h-5" />
-          </button>
-          <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-            <Video className="w-5 h-5" />
-          </button>
-          <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-            <Info className="w-5 h-5" />
-          </button>
-          <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-            <MoreVertical className="w-5 h-5" />
-          </button>
         </div>
       </div>
 
@@ -329,7 +419,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
           </div>
         )}
 
-        {Object.entries(processedMessages).map(([date, msgs]) => (
+        {Object.entries(groupedMessages).map(([date, msgs]) => (
           <div key={date}>
             {/* Date Separator */}
             <div className="flex items-center gap-4 my-4">
@@ -340,22 +430,17 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
               <div className="flex-1 h-px bg-border" />
             </div>
 
-            {/* Messages with unique key */}
-            {msgs.map((message, index) => {
-              // Create a unique key combining message ID and index as fallback
-              const uniqueKey = `${date}-${message.id}-${index}`
-              
-              return (
-                <MessageBubble
-                  key={uniqueKey}
-                  message={message}
-                  isOwn={message.sender_type === 'agent'}
-                  showAvatar={index === 0 || msgs[index - 1]?.sender_id !== message.sender_id}
-                  isLastAgentMessage={message.id === lastAgentMessageId}
-                  onRetry={() => onResendMessage?.(message)}
-                />
-              )
-            })}
+            {/* Messages */}
+            {msgs.map((message, index) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isOwn={message.sender_type === 'agent'}
+                showAvatar={index === 0 || msgs[index - 1]?.sender_id !== message.sender_id}
+                isLastAgentMessage={message.id === lastAgentMessageId}
+                onRetry={() => onResendMessage?.(message)}
+              />
+            ))}
           </div>
         ))}
 
