@@ -1,7 +1,7 @@
 // src/app/(dashboard)/conversations/page.tsx
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { ConversationList } from "@/components/conversations/conversation-list"
 import { ChatView } from "@/components/conversations/chat-view"
 import { CustomerInfo } from "@/components/conversations/customer-info"
@@ -26,6 +26,9 @@ export default function ConversationsPage() {
   const [showCustomerInfo, setShowCustomerInfo] = useState(false)
   const [isMobileView, setIsMobileView] = useState(false)
   const [showMobileChat, setShowMobileChat] = useState(false)
+  
+  // Local unread count tracking (เก็บใน memory แทน database)
+  const [localUnreadCounts, setLocalUnreadCounts] = useState<Record<string, number>>({})
 
   // Scroll management
   const {
@@ -81,6 +84,15 @@ export default function ConversationsPage() {
       }
     }, 'playNotificationSound')
   }, [])
+  
+  // ✨ Update local unread count
+  const updateLocalUnread = useCallback((conversationId: string, count: number) => {
+    console.log(`[updateLocalUnread] Setting unread for ${conversationId}: ${count}`)
+    setLocalUnreadCounts(prev => ({
+      ...prev,
+      [conversationId]: count
+    }))
+  }, [])
 
   // Use conversation polling hook (โหลดครั้งแรกอย่างเดียว ไม่ polling)
   const {
@@ -91,7 +103,7 @@ export default function ConversationsPage() {
     refresh: loadConversations
   } = useConversationPolling({
     pollingInterval: 0, // ปิด polling (0 = disabled)
-    enabled: true, // เปิดให้โหลดครั้งแรก แต่ไม่ polling เพราะ interval = 0
+    enabled: true, // เปิดให้โหลดครั้งแรก
     onNewConversation: (conversation) => {
       safeExecute(() => {
         console.log('New conversation:', conversation.customer.name)
@@ -218,32 +230,42 @@ export default function ConversationsPage() {
     onMessageInsert: (message) => {
       safeExecute(() => {
         console.log('[Realtime] New message inserted:', message)
+        console.log('[Realtime] Looking for conversation:', message.conversation_id)
         
-        // Update conversation with new message
-        const conv = conversations.find(c => c.id === message.conversation_id)
-        if (conv) {
-          // Update last message preview
-          updateConversation(message.conversation_id, {
-            last_message: message,
-            last_message_at: message.created_at,
-            message_count: (conv.message_count || 0) + 1
-          })
-          
-          // Update unread count if not selected conversation
-          if (message.conversation_id !== selectedConversation?.id && message.sender_type === 'customer') {
-            const currentUnread = localUnreadCounts[message.conversation_id] || 0
-            updateLocalUnread(message.conversation_id, currentUnread + 1)
+        // ใช้ setLocalUnreadCounts แบบ callback เพื่อให้ได้ค่า state ล่าสุด
+        setLocalUnreadCounts(prevUnreadCounts => {
+          // ตั้ง unread count ถ้าเป็นข้อความจาก customer และไม่ใช่ conversation ที่เลือกอยู่
+          if (message.sender_type === 'customer' && message.conversation_id !== selectedConversation?.id) {
+            const currentUnread = prevUnreadCounts[message.conversation_id] || 0
+            const newUnreadCount = currentUnread + 1
+            console.log(`[Realtime] Setting unread for conversation ${message.conversation_id}: ${currentUnread} -> ${newUnreadCount}`)
             playNotificationSound()
+            
+            // Return updated state
+            return {
+              ...prevUnreadCounts,
+              [message.conversation_id]: newUnreadCount
+            }
           }
           
-          // Move to top if customer message
-          if (message.sender_type === 'customer') {
-            moveToTop(message.conversation_id)
-          }
-        } else {
-          // New conversation - reload conversations
-          console.log('[Realtime] New conversation detected, reloading...')
-          loadConversations()
+          // No change
+          return prevUnreadCounts
+        })
+        
+        // Always reload conversations to get latest data
+        // This ensures we have the conversation in our list
+        console.log('[Realtime] Reloading conversations to ensure latest data...')
+        loadConversations()
+        
+        // Update conversation if it exists
+        updateConversation(message.conversation_id, {
+          last_message: message,
+          last_message_at: message.created_at
+        })
+        
+        // Move to top if customer message
+        if (message.sender_type === 'customer') {
+          moveToTop(message.conversation_id)
         }
       }, 'Global Realtime onMessageInsert')
     }
@@ -273,17 +295,6 @@ export default function ConversationsPage() {
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
-
-  // Local unread count tracking (เก็บใน memory แทน database)
-  const [localUnreadCounts, setLocalUnreadCounts] = useState<Record<string, number>>({})
-  
-  // ✨ Update conversation with local unread count
-  const updateLocalUnread = useCallback((conversationId: string, count: number) => {
-    setLocalUnreadCounts(prev => ({
-      ...prev,
-      [conversationId]: count
-    }))
-  }, [])
   
   // ✨ Clear unread when selecting conversation
   const handleConversationSelect = useCallback((conversation: Conversation) => {
@@ -291,6 +302,7 @@ export default function ConversationsPage() {
       setSelectedConversation(conversation)
       
       // Clear local unread count
+      console.log(`[handleConversationSelect] Clearing unread for ${conversation.id}`)
       updateLocalUnread(conversation.id, 0)
       
       // Mark as read in database (optional)
@@ -311,6 +323,7 @@ export default function ConversationsPage() {
   useEffect(() => {
     const handleSimulateUnread = (event: CustomEvent) => {
       const { conversationId, unreadCount } = event.detail
+      console.log(`[Event] Simulating unread for ${conversationId}: ${unreadCount}`)
       updateLocalUnread(conversationId, unreadCount)
     }
     
@@ -328,23 +341,27 @@ export default function ConversationsPage() {
     }
   }, [updateLocalUnread, loadConversations])
   
-  // ✨ Merge local unread counts with conversations
-  const conversationsWithUnread = conversations.map(conv => ({
-    ...conv,
-    unread_count: localUnreadCounts[conv.id] || conv.unread_count || 0
-  }))
-
-  // Update unread count when receiving new messages
-  useEffect(() => {
-    if (!selectedConversation) return
+  // ✨ IMPORTANT: Use useMemo to merge local unread counts with conversations
+  const conversationsWithUnread = useMemo(() => {
+    const merged = conversations.map(conv => ({
+      ...conv,
+      unread_count: localUnreadCounts[conv.id] || conv.unread_count || 0
+    }))
     
-    // Clear unread for selected conversation
-    if (selectedConversation.unread_count > 0) {
-      updateConversation(selectedConversation.id, {
-        unread_count: 0
-      })
+    // Debug log
+    const hasUnread = merged.filter(c => c.unread_count > 0)
+    if (hasUnread.length > 0) {
+      console.log('[conversationsWithUnread] Conversations with unread:', hasUnread.map(c => ({
+        name: c.customer.name,
+        unread: c.unread_count
+      })))
     }
-  }, [selectedConversation, messages, updateConversation])
+    
+    return merged
+  }, [conversations, localUnreadCounts]) // ✨ IMPORTANT: Include localUnreadCounts in dependencies
+
+  // Clear unread count when selecting a conversation (ย้ายมาใช้ใน handleConversationSelect แทน)
+  // ลบ useEffect นี้ออกเพื่อป้องกัน infinite loop
 
   // Scroll to bottom when messages load
   useEffect(() => {

@@ -285,10 +285,8 @@ function ConversationItem({
 }) {
   const hasUnread = conversation.unread_count > 0
   
-  // Debug log - ลบออกเมื่อทำงานได้แล้ว
-  if (hasUnread) {
-    console.log(`[ConversationItem] ${conversation.customer.name} has unread:`, conversation.unread_count)
-  }
+  // Debug log - แสดงทุกครั้งเพื่อดูการอัพเดท
+  console.log(`[ConversationItem] ${conversation.customer.name} - unread: ${conversation.unread_count}, hasUnread: ${hasUnread}`)
   
   const timeAgo = formatDistanceToNow(new Date(conversation.last_message_at), { 
     addSuffix: true,
@@ -331,7 +329,12 @@ function ConversationItem({
         />
         {/* Unread indicator dot - แสดงเมื่อมี unread */}
         {hasUnread && (
-          <div className="absolute -top-2 -right-2 w-4 h-4 bg-red-600 rounded-full animate-pulse border-2 border-white dark:border-gray-800 shadow-lg z-10" />
+          <>
+            <div className="absolute -top-2 -right-2 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold border-2 border-white dark:border-gray-800 shadow-lg z-10">
+              {conversation.unread_count > 9 ? '9+' : conversation.unread_count}
+            </div>
+            <div className="absolute -top-2 -right-2 w-5 h-5 bg-red-600 rounded-full animate-ping opacity-75" />
+          </>
         )}
       </div>
 
@@ -341,13 +344,16 @@ function ConversationItem({
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <h3 className={cn(
               "font-medium truncate",
-              hasUnread && "text-foreground"
+              hasUnread && "text-foreground font-semibold"
             )}>
               {conversation.customer.name}
             </h3>
             <PriorityIcon priority={conversation.priority} />
           </div>
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
+          <span className={cn(
+            "text-xs whitespace-nowrap",
+            hasUnread ? "text-foreground font-medium" : "text-muted-foreground"
+          )}>
             {timeAgo}
           </span>
         </div>
