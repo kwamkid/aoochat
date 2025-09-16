@@ -13,8 +13,9 @@ import { conversationPollingService } from "@/services/conversations/conversatio
 import { useConversationPolling } from "@/hooks/use-conversation-polling"
 import { useMessagePolling } from "@/hooks/use-message-polling"
 import { useMessageService } from "@/hooks/use-message-service"
-import { useConversationScroll } from "@/lib/conversation-manager"
-import { safeExecute } from "@/lib/debug-params"
+import { useConversationScroll } from "@/hooks/use-conversation-scroll"
+import { useConversationRealtime, useSupabaseRealtime } from "@/hooks/use-supabase-realtime"
+import { safeExecute } from "@/lib/utils"
 import { toast } from "sonner"
 
 export default function ConversationsPage() {
@@ -81,13 +82,14 @@ export default function ConversationsPage() {
     }, 'playNotificationSound')
   }, [])
 
-  // Use conversation polling hook
+  // Use conversation polling hook (เปลี่ยน interval เป็นนานขึ้น เพราะมี realtime แล้ว)
   const {
     conversations,
     loading: conversationsLoading,
     updateConversation,
     moveToTop
   } = useConversationPolling({
+    pollingInterval: 30000, // เปลี่ยนจาก 3 วินาที เป็น 30 วินาที
     onNewConversation: (conversation) => {
       safeExecute(() => {
         console.log('New conversation:', conversation.customer.name)
@@ -117,7 +119,7 @@ export default function ConversationsPage() {
     }
   })
 
-  // Use message polling hook
+  // Use message polling hook (ลด polling rate เพราะมี realtime)
   const {
     messages,
     loading: messagesLoading,
@@ -128,6 +130,7 @@ export default function ConversationsPage() {
     loadMoreMessages
   } = useMessagePolling({
     conversationId: selectedConversation?.id || null,
+    pollingInterval: 30000, // เปลี่ยนจาก 2 วินาที เป็น 30 วินาที
     onNewMessage: (message) => {
       safeExecute(() => {
         // Play sound for new customer messages
@@ -142,6 +145,109 @@ export default function ConversationsPage() {
       }, 'useMessagePolling onNewMessage')
     },
     enabled: !!selectedConversation
+  })
+
+  // ✨ NEW: Use Realtime for instant updates
+  // Realtime สำหรับ conversation ที่เลือก
+  useConversationRealtime(selectedConversation?.id, {
+    onNewMessage: (message) => {
+      safeExecute(() => {
+        console.log('[Realtime] New message received:', message)
+        
+        // Check if message already exists (prevent duplicates)
+        const existingMessageIndex = messages.findIndex(m => m.id === message.id)
+        if (existingMessageIndex === -1) {
+          // Add new message
+          addMessage(message)
+          
+          // Update conversation
+          updateConversation(selectedConversation!.id, {
+            last_message: message,
+            last_message_at: message.created_at,
+            message_count: (selectedConversation?.message_count || 0) + 1,
+            unread_count: message.sender_type === 'customer' 
+              ? (selectedConversation?.unread_count || 0) + 1 
+              : 0
+          })
+          
+          // Move to top if customer message
+          if (message.sender_type === 'customer') {
+            moveToTop(selectedConversation!.id)
+            playNotificationSound()
+            
+            // Auto scroll if near bottom
+            if (isNearBottom()) {
+              setTimeout(() => scrollToBottom(), 100)
+            }
+          }
+        }
+      }, 'Realtime onNewMessage')
+    },
+    onMessageUpdate: (message) => {
+      safeExecute(() => {
+        console.log('[Realtime] Message updated:', message)
+        replaceMessage(message.id, message)
+      }, 'Realtime onMessageUpdate')
+    },
+    onMessageDelete: (messageId) => {
+      safeExecute(() => {
+        console.log('[Realtime] Message deleted:', messageId)
+        // เพิ่ม logic ลบ message จาก state ถ้าต้องการ
+      }, 'Realtime onMessageDelete')
+    },
+    enabled: !!selectedConversation
+  })
+
+  // ✨ NEW: Global realtime for all conversations (สำหรับ conversation list)
+  useSupabaseRealtime({
+    onConversationUpdate: (conversationData) => {
+      safeExecute(() => {
+        console.log('[Realtime] Conversation updated:', conversationData)
+        
+        // Update conversation in list
+        if (conversationData.id) {
+          updateConversation(conversationData.id, conversationData)
+        }
+      }, 'Global Realtime onConversationUpdate')
+    },
+    onMessageInsert: (message) => {
+      safeExecute(() => {
+        // ถ้าเป็น message ใน conversation อื่นที่ไม่ได้เลือก
+        if (message.conversation_id !== selectedConversation?.id) {
+          console.log('[Realtime] New message in other conversation')
+          
+          // Update conversation list
+          const conv = conversations.find(c => c.id === message.conversation_id)
+          if (conv) {
+            updateConversation(message.conversation_id, {
+              last_message: message,
+              last_message_at: message.created_at,
+              unread_count: message.sender_type === 'customer' 
+                ? (conv.unread_count || 0) + 1 
+                : conv.unread_count
+            })
+            
+            // Move to top if customer message
+            if (message.sender_type === 'customer') {
+              moveToTop(message.conversation_id)
+              playNotificationSound()
+              
+              // Browser notification
+              if ('Notification' in window && Notification.permission === 'granted') {
+                try {
+                  new Notification(`New message from ${conv.customer.name}`, {
+                    body: message.content?.text || 'New message',
+                    icon: '/favicon.ico'
+                  })
+                } catch (e) {
+                  console.log('Could not show notification:', e)
+                }
+              }
+            }
+          }
+        }
+      }, 'Global Realtime onMessageInsert')
+    }
   })
 
   // Handle scroll for loading more messages
@@ -207,7 +313,6 @@ export default function ConversationsPage() {
     }
   }, [messages.length, messagesLoadingMore, isNearBottom, scrollToBottom])
 
-  // Handle send message with message service
   // Handle send message - non-blocking for multiple messages
   const handleSendMessage = async (content: string, retryMessageId?: string) => {
     if (!selectedConversation || !content.trim()) return
@@ -332,7 +437,6 @@ export default function ConversationsPage() {
                   onLoadMore={loadMoreMessages}
                   loading={messagesLoadingMore}
                   hasMore={hasMoreMessages}
-                  typing={sending}
                   onScroll={handleScroll}
                 />
               )}
@@ -385,7 +489,6 @@ export default function ConversationsPage() {
             onLoadMore={loadMoreMessages}
             loading={messagesLoadingMore}
             hasMore={hasMoreMessages}
-            typing={sending}
             onScroll={handleScroll}
           />
         )}

@@ -23,10 +23,23 @@ import {
   MessageCircle,
   ArrowDown
 } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { format, isToday, isYesterday } from "date-fns"
-import { th } from "date-fns/locale"
+import { cn, formatMessageTime, formatDateSeparator, useDateFormatter } from "@/lib/utils"
+import { format } from "date-fns"
 import type { Conversation, Message, MessageType, SenderType } from "@/types/conversation.types"
+
+// Tooltip Component
+const Tooltip = ({ children, content }: { children: React.ReactNode; content: string }) => {
+  return (
+    <div className="group relative inline-block">
+      {children}
+      <div className="invisible group-hover:visible absolute z-50 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded shadow-lg whitespace-nowrap
+        bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        {content}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
+      </div>
+    </div>
+  )
+}
 
 // Message Status - Only show for last message
 const MessageStatus = ({ status, onRetry, isLastMessage }: { 
@@ -96,6 +109,9 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   const [selectedMessages, setSelectedMessages] = useState<string[]>([])
   const [isRecording, setIsRecording] = useState(false)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  
+  // Use date formatter hook
+  const { formatMessage, formatSeparator } = useDateFormatter({ locale: 'th' })
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -170,13 +186,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
   }
 
   const formatMessageDate = (date: string) => {
-    const messageDate = new Date(date)
-    if (isToday(messageDate)) {
-      return format(messageDate, 'HH:mm')
-    } else if (isYesterday(messageDate)) {
-      return `เมื่อวาน ${format(messageDate, 'HH:mm')}`
-    }
-    return format(messageDate, 'd MMM yyyy HH:mm', { locale: th })
+    return formatMessage(date)
   }
 
   // Group messages by date
@@ -258,7 +268,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
       {/* Messages Container */}
       <div 
         ref={containerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        className="flex-1 overflow-y-auto p-4 space-y-1"
         onScroll={() => {
           if (containerRef && 'current' in containerRef && containerRef.current && !isLoadingMoreRef.current) {
             const { scrollTop } = containerRef.current
@@ -304,12 +314,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
             <div className="flex items-center gap-4 my-4">
               <div className="flex-1 h-px bg-border" />
               <span className="text-xs text-muted-foreground px-2">
-                {isToday(new Date(date)) 
-                  ? 'วันนี้' 
-                  : isYesterday(new Date(date))
-                  ? 'เมื่อวาน'
-                  : format(new Date(date), 'd MMMM yyyy', { locale: th })
-                }
+                {formatSeparator(date)}
               </span>
               <div className="flex-1 h-px bg-border" />
             </div>
@@ -480,7 +485,7 @@ function MessageBubble({
   isLastAgentMessage?: boolean
   onRetry?: () => void
 }) {
-  const [showTime, setShowTime] = useState(false)
+  const { formatMessage } = useDateFormatter({ locale: 'th' })
 
   const renderMessageContent = () => {
     switch (message.message_type) {
@@ -535,16 +540,12 @@ function MessageBubble({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
+    <div
       data-message-id={message.id}
       className={cn(
-        "flex gap-2 group",
+        "flex gap-2 pb-3", // Added pb-3 for spacing between messages
         isOwn ? "justify-end" : "justify-start"
       )}
-      onMouseEnter={() => setShowTime(true)}
-      onMouseLeave={() => setShowTime(false)}
     >
       {/* Customer avatar */}
       {!isOwn && showAvatar && (
@@ -559,51 +560,41 @@ function MessageBubble({
         "max-w-xs lg:max-w-md flex flex-col",
         isOwn ? "items-end" : "items-start"
       )}>
-        <div className={cn(
-          "px-4 py-2 rounded-2xl relative",
-          isOwn 
-            ? message.status === 'failed' 
-              ? "bg-red-500/20 text-red-900 dark:text-red-100 border border-red-300 dark:border-red-700"
-              : "bg-brand-500 text-white" 
-            : "bg-muted",
-          message.is_private && "bg-yellow-100 dark:bg-yellow-900/30 border-2 border-yellow-300 dark:border-yellow-700"
-        )}>
-          {message.is_private && (
-            <div className="flex items-center gap-1 text-xs text-yellow-700 dark:text-yellow-300 mb-1">
-              <Shield className="w-3 h-3" />
-              <span>โน้ตภายใน</span>
-            </div>
-          )}
-          
-          {renderMessageContent()}
-        </div>
+        <Tooltip content={formatMessage(message.created_at)}>
+          <div className={cn(
+            "px-4 py-2 rounded-2xl relative cursor-default",
+            isOwn 
+              ? message.status === 'failed' 
+                ? "bg-red-500/20 text-red-900 dark:text-red-100 border border-red-300 dark:border-red-700"
+                : "bg-brand-500 text-white" 
+              : "bg-muted",
+            message.is_private && "bg-yellow-100 dark:bg-yellow-900/30 border-2 border-yellow-300 dark:border-yellow-700"
+          )}>
+            {message.is_private && (
+              <div className="flex items-center gap-1 text-xs text-yellow-700 dark:text-yellow-300 mb-1">
+                <Shield className="w-3 h-3" />
+                <span>โน้ตภายใน</span>
+              </div>
+            )}
+            
+            {renderMessageContent()}
+          </div>
+        </Tooltip>
         
-        {/* Show time on hover or status for last agent message */}
-        <AnimatePresence>
-          {(showTime || (isOwn && isLastAgentMessage)) && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className={cn(
-                "flex items-center gap-2 mt-1 px-1 text-xs text-muted-foreground",
-                isOwn ? "flex-row-reverse" : "flex-row"
-              )}
-            >
-              {showTime && (
-                <span>{format(new Date(message.created_at), 'HH:mm')}</span>
-              )}
-              {isOwn && isLastAgentMessage && (
-                <MessageStatus 
-                  status={message.status} 
-                  onRetry={onRetry} 
-                  isLastMessage={true}
-                />
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Status for last agent message only */}
+        {isOwn && isLastAgentMessage && (
+          <div className={cn(
+            "flex items-center gap-2 mt-1 px-1 text-xs text-muted-foreground",
+            isOwn ? "flex-row-reverse" : "flex-row"
+          )}>
+            <MessageStatus 
+              status={message.status} 
+              onRetry={onRetry} 
+              isLastMessage={true}
+            />
+          </div>
+        )}
       </div>
-    </motion.div>
+    </div>
   )
 }

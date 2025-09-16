@@ -1,26 +1,26 @@
-// src/lib/conversation-manager.ts
+// src/hooks/use-conversation-scroll.ts
 
 import { RefObject, useCallback, useEffect, useRef } from 'react'
 
 /**
- * Options for conversation manager
+ * Options for conversation scroll management
  */
-export interface ConversationManagerOptions {
+export interface ConversationScrollOptions {
   autoScrollToBottom?: boolean
   scrollThreshold?: number
   smoothScroll?: boolean
 }
 
 /**
- * Conversation scroll manager
+ * Conversation scroll manager class
  */
 export class ConversationScrollManager {
   private container: HTMLElement | null = null
   private isUserScrolling = false
   private lastScrollTop = 0
-  private options: ConversationManagerOptions
+  private options: ConversationScrollOptions
   
-  constructor(options: ConversationManagerOptions = {}) {
+  constructor(options: ConversationScrollOptions = {}) {
     this.options = {
       autoScrollToBottom: true,
       scrollThreshold: 100,
@@ -157,7 +157,7 @@ export class ConversationScrollManager {
 /**
  * React hook for conversation scroll management
  */
-export function useConversationScroll(options?: ConversationManagerOptions) {
+export function useConversationScroll(options?: ConversationScrollOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const managerRef = useRef<ConversationScrollManager | null>(null)
   
