@@ -48,7 +48,7 @@ export default function ConversationsPage() {
     markAsRead,
     deleteMessage
   } = useMessageService({
-    conversationId: selectedConversation?.id || null, // แก้ไขตรงนี้: เพิ่ม || null
+    conversationId: selectedConversation?.id || null,
     platform: selectedConversation?.platform,
     onMessageSent: (message: Message) => {
       console.log('Message sent successfully:', message)
@@ -82,44 +82,47 @@ export default function ConversationsPage() {
     }, 'playNotificationSound')
   }, [])
 
-  // Use conversation polling hook (เปลี่ยน interval เป็นนานขึ้น เพราะมี realtime แล้ว)
+  // Use conversation polling hook (โหลดครั้งแรกอย่างเดียว ไม่ polling)
   const {
     conversations,
     loading: conversationsLoading,
     updateConversation,
-    moveToTop
+    moveToTop,
+    refresh: loadConversations
   } = useConversationPolling({
-    pollingInterval: 30000, // เปลี่ยนจาก 3 วินาที เป็น 30 วินาที
+    pollingInterval: 0, // ปิด polling (0 = disabled)
+    enabled: true, // เปิดให้โหลดครั้งแรก แต่ไม่ polling เพราะ interval = 0
     onNewConversation: (conversation) => {
       safeExecute(() => {
         console.log('New conversation:', conversation.customer.name)
         playNotificationSound()
-        
-        // Browser notification
-        if ('Notification' in window && Notification.permission === 'granted') {
-          try {
-            new Notification('New conversation!', {
-              body: `${conversation.customer.name}: ${conversation.last_message?.content?.text || 'New message'}`,
-              icon: '/favicon.ico'
-            })
-          } catch (e) {
-            console.log('Could not show notification:', e)
-          }
+        // Set unread count for new conversation
+        if (conversation.id !== selectedConversation?.id) {
+          updateLocalUnread(conversation.id, 1)
         }
       }, 'onNewConversation callback')
     },
     onNewMessage: (conversation) => {
       safeExecute(() => {
-        // Only notify if not the current conversation
+        // Only notify and mark unread if not the current conversation
         if (conversation.id !== selectedConversation?.id) {
           console.log('New message from:', conversation.customer.name)
           playNotificationSound()
+          // Update local unread count
+          const currentUnread = localUnreadCounts[conversation.id] || 0
+          updateLocalUnread(conversation.id, currentUnread + 1)
         }
       }, 'onNewMessage callback')
     }
   })
 
-  // Use message polling hook (ลด polling rate เพราะมี realtime)
+  // Load conversations once on mount
+  useEffect(() => {
+    console.log('[ConversationsPage] Initial load')
+    loadConversations()
+  }, [])
+
+  // Use message polling hook
   const {
     messages,
     loading: messagesLoading,
@@ -130,7 +133,7 @@ export default function ConversationsPage() {
     loadMoreMessages
   } = useMessagePolling({
     conversationId: selectedConversation?.id || null,
-    pollingInterval: 30000, // เปลี่ยนจาก 2 วินาที เป็น 30 วินาที
+    pollingInterval: 30000, // Poll every 30 seconds
     onNewMessage: (message) => {
       safeExecute(() => {
         // Play sound for new customer messages
@@ -147,11 +150,7 @@ export default function ConversationsPage() {
     enabled: !!selectedConversation
   })
 
-  // ✨ NEW: Use Realtime for instant updates
-  // src/app/(dashboard)/conversations/page.tsx - Realtime hooks section
-// (ใส่ code นี้แทนที่ส่วน realtime hooks เดิม)
-
-  // ✨ Realtime สำหรับ conversation ที่เลือก
+  // ✨ Realtime for selected conversation
   useConversationRealtime(selectedConversation?.id || null, {
     onNewMessage: (message) => {
       safeExecute(() => {
@@ -169,9 +168,8 @@ export default function ConversationsPage() {
               last_message: message,
               last_message_at: message.created_at,
               message_count: (selectedConversation.message_count || 0) + 1,
-              unread_count: message.sender_type === 'customer' 
-                ? (selectedConversation.unread_count || 0) + 1 
-                : 0
+              // Don't increase unread for selected conversation
+              unread_count: 0
             })
             
             // Move to top if customer message
@@ -200,13 +198,12 @@ export default function ConversationsPage() {
     onMessageDelete: (messageId) => {
       safeExecute(() => {
         console.log('[Realtime] Message deleted:', messageId)
-        // เพิ่ม logic ลบ message จาก state ถ้าต้องการ
       }, 'Realtime onMessageDelete')
     },
     enabled: !!selectedConversation
   })
 
-  // ✨ Global realtime for all conversations (สำหรับ conversation list)
+  // ✨ Global realtime for all conversations
   useSupabaseRealtime({
     onConversationUpdate: (conversationData) => {
       safeExecute(() => {
@@ -220,39 +217,33 @@ export default function ConversationsPage() {
     },
     onMessageInsert: (message) => {
       safeExecute(() => {
-        // ถ้าเป็น message ใน conversation อื่นที่ไม่ได้เลือก
-        if (message.conversation_id !== selectedConversation?.id) {
-          console.log('[Realtime] New message in other conversation')
+        console.log('[Realtime] New message inserted:', message)
+        
+        // Update conversation with new message
+        const conv = conversations.find(c => c.id === message.conversation_id)
+        if (conv) {
+          // Update last message preview
+          updateConversation(message.conversation_id, {
+            last_message: message,
+            last_message_at: message.created_at,
+            message_count: (conv.message_count || 0) + 1
+          })
           
-          // Update conversation list
-          const conv = conversations.find(c => c.id === message.conversation_id)
-          if (conv) {
-            updateConversation(message.conversation_id, {
-              last_message: message,
-              last_message_at: message.created_at,
-              unread_count: message.sender_type === 'customer' 
-                ? (conv.unread_count || 0) + 1 
-                : conv.unread_count
-            })
-            
-            // Move to top if customer message
-            if (message.sender_type === 'customer') {
-              moveToTop(message.conversation_id)
-              playNotificationSound()
-              
-              // Browser notification
-              if ('Notification' in window && Notification.permission === 'granted') {
-                try {
-                  new Notification(`New message from ${conv.customer.name}`, {
-                    body: message.content?.text || 'New message',
-                    icon: '/favicon.ico'
-                  })
-                } catch (e) {
-                  console.log('Could not show notification:', e)
-                }
-              }
-            }
+          // Update unread count if not selected conversation
+          if (message.conversation_id !== selectedConversation?.id && message.sender_type === 'customer') {
+            const currentUnread = localUnreadCounts[message.conversation_id] || 0
+            updateLocalUnread(message.conversation_id, currentUnread + 1)
+            playNotificationSound()
           }
+          
+          // Move to top if customer message
+          if (message.sender_type === 'customer') {
+            moveToTop(message.conversation_id)
+          }
+        } else {
+          // New conversation - reload conversations
+          console.log('[Realtime] New conversation detected, reloading...')
+          loadConversations()
         }
       }, 'Global Realtime onMessageInsert')
     }
@@ -283,33 +274,77 @@ export default function ConversationsPage() {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Request notification permission on mount
-  useEffect(() => {
-    safeExecute(() => {
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().catch(console.log)
-      }
-    }, 'Request notification permission')
+  // Local unread count tracking (เก็บใน memory แทน database)
+  const [localUnreadCounts, setLocalUnreadCounts] = useState<Record<string, number>>({})
+  
+  // ✨ Update conversation with local unread count
+  const updateLocalUnread = useCallback((conversationId: string, count: number) => {
+    setLocalUnreadCounts(prev => ({
+      ...prev,
+      [conversationId]: count
+    }))
   }, [])
+  
+  // ✨ Clear unread when selecting conversation
+  const handleConversationSelect = useCallback((conversation: Conversation) => {
+    safeExecute(() => {
+      setSelectedConversation(conversation)
+      
+      // Clear local unread count
+      updateLocalUnread(conversation.id, 0)
+      
+      // Mark as read in database (optional)
+      if (conversation.unread_count > 0 || localUnreadCounts[conversation.id] > 0) {
+        conversationPollingService.markAsRead(conversation.id)
+      }
+      
+      if (isMobileView) {
+        setShowMobileChat(true)
+      }
+      
+      // Scroll to bottom when conversation changes
+      setTimeout(() => scrollToBottom(true), 100)
+    }, 'Handle conversation selection')
+  }, [isMobileView, scrollToBottom, localUnreadCounts, updateLocalUnread])
 
-  // Handle conversation selection
+  // ✨ Event listeners for test buttons
   useEffect(() => {
-    if (selectedConversation) {
-      safeExecute(() => {
-        // Mark as read
-        if (selectedConversation.unread_count > 0) {
-          conversationPollingService.markAsRead(selectedConversation.id)
-        }
-        
-        if (isMobileView) {
-          setShowMobileChat(true)
-        }
-        
-        // Scroll to bottom when conversation changes
-        setTimeout(() => scrollToBottom(true), 100)
-      }, 'Handle conversation selection')
+    const handleSimulateUnread = (event: CustomEvent) => {
+      const { conversationId, unreadCount } = event.detail
+      updateLocalUnread(conversationId, unreadCount)
     }
-  }, [selectedConversation, isMobileView, scrollToBottom])
+    
+    const handleRefresh = () => {
+      console.log('[ConversationsPage] Manual refresh triggered')
+      loadConversations()
+    }
+    
+    window.addEventListener('simulateUnread', handleSimulateUnread as any)
+    window.addEventListener('refreshConversations', handleRefresh as any)
+    
+    return () => {
+      window.removeEventListener('simulateUnread', handleSimulateUnread as any)
+      window.removeEventListener('refreshConversations', handleRefresh as any)
+    }
+  }, [updateLocalUnread, loadConversations])
+  
+  // ✨ Merge local unread counts with conversations
+  const conversationsWithUnread = conversations.map(conv => ({
+    ...conv,
+    unread_count: localUnreadCounts[conv.id] || conv.unread_count || 0
+  }))
+
+  // Update unread count when receiving new messages
+  useEffect(() => {
+    if (!selectedConversation) return
+    
+    // Clear unread for selected conversation
+    if (selectedConversation.unread_count > 0) {
+      updateConversation(selectedConversation.id, {
+        unread_count: 0
+      })
+    }
+  }, [selectedConversation, messages, updateConversation])
 
   // Scroll to bottom when messages load
   useEffect(() => {
@@ -402,14 +437,9 @@ export default function ConversationsPage() {
                 </div>
               ) : (
                 <ConversationList
-                  conversations={conversations}
+                  conversations={conversationsWithUnread}
                   selectedId={selectedConversation?.id}
-                  onSelect={(conv) => {
-                    safeExecute(() => {
-                      setSelectedConversation(conv)
-                      setShowMobileChat(true)
-                    }, 'Mobile conversation select')
-                  }}
+                  onSelect={handleConversationSelect}
                 />
               )}
             </motion.div>
@@ -474,9 +504,9 @@ export default function ConversationsPage() {
           </div>
         ) : (
           <ConversationList
-            conversations={conversations}
+            conversations={conversationsWithUnread}
             selectedId={selectedConversation?.id}
-            onSelect={(conv) => safeExecute(() => setSelectedConversation(conv), 'Desktop conversation select')}
+            onSelect={handleConversationSelect}
           />
         )}
       </div>

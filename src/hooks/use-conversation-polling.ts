@@ -21,6 +21,19 @@ export function useConversationPolling({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
+  // Store callbacks in refs to prevent re-renders
+  const onNewConversationRef = useRef(onNewConversation)
+  const onNewMessageRef = useRef(onNewMessage)
+  
+  // Update refs when callbacks change
+  useEffect(() => {
+    onNewConversationRef.current = onNewConversation
+  }, [onNewConversation])
+  
+  useEffect(() => {
+    onNewMessageRef.current = onNewMessage
+  }, [onNewMessage])
+  
   // Tracking refs
   const lastCheckRef = useRef<{
     conversationId: string | null
@@ -62,8 +75,8 @@ export function useConversationPolling({
           console.log('[useConversationPolling] New conversation detected:', latestConv.customer.name)
           conversationMapRef.current.set(latestConv.id, latestConv)
           
-          if (onNewConversation) {
-            onNewConversation(latestConv)
+          if (onNewConversationRef.current) {
+            onNewConversationRef.current(latestConv)
           }
         } else {
           // Check for new message in existing conversation
@@ -76,8 +89,8 @@ export function useConversationPolling({
               console.log('[useConversationPolling] New message in conversation:', latestConv.customer.name)
               conversationMapRef.current.set(latestConv.id, latestConv)
               
-              if (onNewMessage) {
-                onNewMessage(latestConv)
+              if (onNewMessageRef.current) {
+                onNewMessageRef.current(latestConv)
               }
             }
           }
@@ -122,7 +135,7 @@ export function useConversationPolling({
         isFirstLoadRef.current = false
       }
     }
-  }, [onNewConversation, onNewMessage])
+  }, []) // ลบ dependencies ทั้งหมดออก
 
   // Update single conversation
   const updateConversation = useCallback((conversationId: string, updates: Partial<Conversation>) => {
@@ -214,34 +227,42 @@ export function useConversationPolling({
       pollingTimeoutRef.current = null
     }
 
+    // Always load initial data if enabled
     if (!enabled) {
+      console.log('[useConversationPolling] Hook disabled')
       return
     }
 
     // Initial load
-    console.log('[useConversationPolling] Starting polling...')
+    console.log('[useConversationPolling] Loading initial conversations...')
     loadConversations()
 
-    // Setup polling loop
-    const poll = () => {
-      pollingTimeoutRef.current = setTimeout(() => {
-        loadConversations()
-        poll() // Schedule next poll
-      }, pollingInterval)
-    }
+    // Setup polling only if interval > 0
+    if (pollingInterval > 0) {
+      console.log('[useConversationPolling] Starting polling with interval:', pollingInterval)
+      
+      const poll = () => {
+        pollingTimeoutRef.current = setTimeout(() => {
+          loadConversations()
+          poll() // Schedule next poll
+        }, pollingInterval)
+      }
 
-    // Start polling after initial load
-    poll()
+      // Start polling after initial load
+      poll()
+    } else {
+      console.log('[useConversationPolling] Polling disabled (interval = 0), using realtime only')
+    }
 
     // Cleanup
     return () => {
-      console.log('[useConversationPolling] Stopping polling...')
       if (pollingTimeoutRef.current) {
+        console.log('[useConversationPolling] Stopping polling...')
         clearTimeout(pollingTimeoutRef.current)
         pollingTimeoutRef.current = null
       }
     }
-  }, [enabled, pollingInterval, loadConversations])
+  }, [enabled, pollingInterval]) // ลบ loadConversations ออกจาก dependencies
 
   // Get total unread count
   const getTotalUnreadCount = useCallback(() => {

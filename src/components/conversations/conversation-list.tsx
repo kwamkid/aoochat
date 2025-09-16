@@ -57,25 +57,6 @@ const getPlatformColor = (platform: Platform) => {
   return colors[platform] || "bg-gray-500"
 }
 
-// Status Badge
-const StatusBadge = ({ status }: { status: ConversationStatus }) => {
-  const config = {
-    new: { color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400", label: "ใหม่" },
-    open: { color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400", label: "เปิด" },
-    pending: { color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400", label: "รอดำเนินการ" },
-    resolved: { color: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400", label: "แก้ไขแล้ว" },
-    spam: { color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400", label: "สแปม" }
-  }
-  
-  const { color, label } = config[status]
-  
-  return (
-    <span className={cn("px-2 py-0.5 text-xs font-medium rounded-full", color)}>
-      {label}
-    </span>
-  )
-}
-
 // Priority Icon
 const PriorityIcon = ({ priority }: { priority: Priority }) => {
   if (priority === 'urgent') {
@@ -160,6 +141,37 @@ export function ConversationList({
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">การสนทนา</h2>
           <div className="flex items-center gap-2">
+            {/* Test Button - สำหรับทดสอบ unread */}
+            <button
+              onClick={() => {
+                // จำลอง unread สำหรับทุก conversation
+                conversations.forEach(conv => {
+                  if (!selectedId || conv.id !== selectedId) {
+                    // Random unread count 1-5
+                    const randomUnread = Math.floor(Math.random() * 5) + 1
+                    console.log(`Setting unread for ${conv.customer.name}: ${randomUnread}`)
+                    window.dispatchEvent(new CustomEvent('simulateUnread', { 
+                      detail: { conversationId: conv.id, unreadCount: randomUnread }
+                    }))
+                  }
+                })
+              }}
+              className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-xs"
+              title="Simulate unread messages"
+            >
+              Test Unread
+            </button>
+            {/* Refresh Button - โหลดข้อมูลใหม่ */}
+            <button
+              onClick={() => {
+                console.log('Manual refresh conversations')
+                window.dispatchEvent(new CustomEvent('refreshConversations'))
+              }}
+              className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-xs"
+              title="Refresh conversations"
+            >
+              Refresh
+            </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={cn(
@@ -187,7 +199,7 @@ export function ConversationList({
           />
         </div>
         
-        {/* Filters */}
+        {/* Filters - ลบ status badges ออกจากที่นี่ */}
         <AnimatePresence>
           {showFilters && (
             <motion.div
@@ -196,7 +208,7 @@ export function ConversationList({
               exit={{ height: 0, opacity: 0 }}
               className="mt-3 flex flex-wrap gap-2 overflow-hidden"
             >
-              {(['all', 'new', 'open', 'pending', 'resolved'] as const).map(status => (
+              {(['all', 'open', 'pending', 'resolved'] as const).map(status => (
                 <button
                   key={status}
                   onClick={() => setFilterStatus(status)}
@@ -207,7 +219,10 @@ export function ConversationList({
                       : "bg-muted hover:bg-muted/80"
                   )}
                 >
-                  {status === 'all' ? 'ทั้งหมด' : <StatusBadge status={status} />}
+                  {status === 'all' ? 'ทั้งหมด' : 
+                   status === 'open' ? 'กำลังสนทนา' :
+                   status === 'pending' ? 'รอดำเนินการ' :
+                   'แก้ไขแล้ว'}
                 </button>
               ))}
             </motion.div>
@@ -269,6 +284,12 @@ function ConversationItem({
   onClick: () => void
 }) {
   const hasUnread = conversation.unread_count > 0
+  
+  // Debug log - ลบออกเมื่อทำงานได้แล้ว
+  if (hasUnread) {
+    console.log(`[ConversationItem] ${conversation.customer.name} has unread:`, conversation.unread_count)
+  }
+  
   const timeAgo = formatDistanceToNow(new Date(conversation.last_message_at), { 
     addSuffix: true,
     locale: th 
@@ -308,15 +329,16 @@ function ConversationItem({
           isVerified={pageInfo?.pageVerified}
           size="md"
         />
+        {/* Unread indicator dot - แสดงเมื่อมี unread */}
         {hasUnread && (
-          <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+          <div className="absolute -top-2 -right-2 w-4 h-4 bg-red-600 rounded-full animate-pulse border-2 border-white dark:border-gray-800 shadow-lg z-10" />
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2 mb-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             <h3 className={cn(
               "font-medium truncate",
               hasUnread && "text-foreground"
@@ -337,17 +359,17 @@ function ConversationItem({
           {conversation.last_message?.content.text || "ส่งรูปภาพ"}
         </p>
         
+        {/* Tags only - no status badge */}
         <div className="flex items-center gap-2">
-          <StatusBadge status={conversation.status} />
           {conversation.tags.slice(0, 2).map(tag => (
             <span key={tag} className="flex items-center gap-1 text-xs text-muted-foreground">
               <Hash className="w-3 h-3" />
               {tag}
             </span>
           ))}
-          {conversation.unread_count > 0 && (
-            <span className="ml-auto px-2 py-0.5 bg-red-500 text-white text-xs rounded-full">
-              {conversation.unread_count}
+          {conversation.tags.length > 2 && (
+            <span className="text-xs text-muted-foreground">
+              +{conversation.tags.length - 2}
             </span>
           )}
         </div>
