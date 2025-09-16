@@ -105,7 +105,10 @@ export function useSupabaseRealtime({
         (payload: RealtimePostgresChangesPayload<any>) => {
           console.log('[Realtime] Message deleted:', payload.old)
           if (onMessageDelete && payload.old) {
-            onMessageDelete(payload.old.id)
+            // แก้ไขตรงนี้: ตรวจสอบว่า payload.old มี id หรือไม่
+            if ('id' in payload.old && typeof payload.old.id === 'string') {
+              onMessageDelete(payload.old.id)
+            }
           }
         }
       )
@@ -230,7 +233,10 @@ export function useConversationRealtime(
         (payload: RealtimePostgresChangesPayload<any>) => {
           console.log('[ConversationRealtime] Message deleted in conversation:', payload.old)
           if (onMessageDelete && payload.old) {
-            onMessageDelete(payload.old.id)
+            // แก้ไขตรงนี้: ตรวจสอบว่า payload.old มี id หรือไม่
+            if ('id' in payload.old && typeof payload.old.id === 'string') {
+              onMessageDelete(payload.old.id)
+            }
           }
         }
       )

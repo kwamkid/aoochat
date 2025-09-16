@@ -48,7 +48,7 @@ export default function ConversationsPage() {
     markAsRead,
     deleteMessage
   } = useMessageService({
-    conversationId: selectedConversation?.id,
+    conversationId: selectedConversation?.id || null, // แก้ไขตรงนี้: เพิ่ม || null
     platform: selectedConversation?.platform,
     onMessageSent: (message: Message) => {
       console.log('Message sent successfully:', message)
@@ -149,7 +149,7 @@ export default function ConversationsPage() {
 
   // ✨ NEW: Use Realtime for instant updates
   // Realtime สำหรับ conversation ที่เลือก
-  useConversationRealtime(selectedConversation?.id, {
+  useConversationRealtime(selectedConversation?.id || null, { // แก้ไขตรงนี้: เพิ่ม || null
     onNewMessage: (message) => {
       safeExecute(() => {
         console.log('[Realtime] New message received:', message)

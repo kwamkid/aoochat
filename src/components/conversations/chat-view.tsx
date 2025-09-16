@@ -1,7 +1,7 @@
 // src/components/conversations/chat-view.tsx
 "use client"
 
-import React, { useState, useRef, useEffect } from "react"
+import React, { useState, useRef, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
   Send as SendIcon, 
@@ -189,18 +189,39 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
     return formatMessage(date)
   }
 
-  // Group messages by date
-  const groupedMessages = messages.reduce((acc, message) => {
-    const date = format(new Date(message.created_at), 'yyyy-MM-dd')
-    if (!acc[date]) {
-      acc[date] = []
-    }
-    acc[date].push(message)
-    return acc
-  }, {} as Record<string, Message[]>)
+  // Remove duplicate messages and group by date
+  const processedMessages = useMemo(() => {
+    // Remove duplicates by keeping only the last occurrence of each message ID
+    const uniqueMessagesMap = new Map<string, Message>()
+    
+    messages.forEach(message => {
+      uniqueMessagesMap.set(message.id, message)
+    })
+    
+    // Convert back to array and sort by created_at
+    const uniqueMessages = Array.from(uniqueMessagesMap.values()).sort((a, b) => {
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    })
+    
+    // Group messages by date
+    const grouped = uniqueMessages.reduce((acc, message) => {
+      const date = format(new Date(message.created_at), 'yyyy-MM-dd')
+      if (!acc[date]) {
+        acc[date] = []
+      }
+      acc[date].push(message)
+      return acc
+    }, {} as Record<string, Message[]>)
+    
+    return grouped
+  }, [messages])
 
   // Find last agent message
-  const lastAgentMessageId = [...messages].reverse().find(m => m.sender_type === 'agent')?.id
+  const lastAgentMessageId = useMemo(() => {
+    const sortedMessages = Object.values(processedMessages).flat()
+    const lastAgentMsg = [...sortedMessages].reverse().find(m => m.sender_type === 'agent')
+    return lastAgentMsg?.id
+  }, [processedMessages])
 
   if (!conversation) {
     return (
@@ -308,7 +329,7 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
           </div>
         )}
 
-        {Object.entries(groupedMessages).map(([date, msgs]) => (
+        {Object.entries(processedMessages).map(([date, msgs]) => (
           <div key={date}>
             {/* Date Separator */}
             <div className="flex items-center gap-4 my-4">
@@ -319,17 +340,22 @@ export const ChatView = React.forwardRef<HTMLDivElement, ChatViewProps>(({
               <div className="flex-1 h-px bg-border" />
             </div>
 
-            {/* Messages */}
-            {msgs.map((message, index) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                isOwn={message.sender_type === 'agent'}
-                showAvatar={index === 0 || msgs[index - 1]?.sender_id !== message.sender_id}
-                isLastAgentMessage={message.id === lastAgentMessageId}
-                onRetry={() => onResendMessage?.(message)}
-              />
-            ))}
+            {/* Messages with unique key */}
+            {msgs.map((message, index) => {
+              // Create a unique key combining message ID and index as fallback
+              const uniqueKey = `${date}-${message.id}-${index}`
+              
+              return (
+                <MessageBubble
+                  key={uniqueKey}
+                  message={message}
+                  isOwn={message.sender_type === 'agent'}
+                  showAvatar={index === 0 || msgs[index - 1]?.sender_id !== message.sender_id}
+                  isLastAgentMessage={message.id === lastAgentMessageId}
+                  onRetry={() => onResendMessage?.(message)}
+                />
+              )
+            })}
           </div>
         ))}
 
