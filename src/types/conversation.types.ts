@@ -1,7 +1,25 @@
 // src/types/conversation.types.ts
 
 export type Platform = 'facebook' | 'instagram' | 'line' | 'whatsapp' | 'shopee' | 'lazada' | 'tiktok'
-export type MessageType = 'text' | 'image' | 'video' | 'file' | 'voice' | 'location' | 'sticker' | 'product' | 'rich_message'
+
+// Updated MessageType to include all types
+export type MessageType = 
+  | 'text' 
+  | 'image' 
+  | 'video' 
+  | 'file' 
+  | 'audio'
+  | 'voice' 
+  | 'location' 
+  | 'sticker' 
+  | 'contact'
+  | 'product' 
+  | 'rich_message'
+  | 'template'
+  | 'carousel'
+  | 'buttons'
+  | 'flex'
+
 export type ConversationStatus = 'new' | 'open' | 'pending' | 'resolved' | 'spam'
 export type Priority = 'low' | 'normal' | 'high' | 'urgent'
 export type SenderType = 'customer' | 'agent' | 'system' | 'bot'
@@ -74,17 +92,50 @@ export interface Message {
 }
 
 export interface MessageContent {
+  // Text content
   text?: string
+  
+  // Media URLs
   media_url?: string
   media_type?: string
   thumbnail_url?: string
+  url?: string
+  
+  // File information
   file_name?: string
   file_size?: number
+  file_url?: string
+  file_type?: string
+  
+  // Audio/Voice
+  audio_url?: string
+  duration?: number
+  
+  // Sticker
+  sticker_id?: string
+  sticker_url?: string
+  package_id?: string
+  
+  // Location
   location?: {
     latitude: number
     longitude: number
     address?: string
+    name?: string
   }
+  latitude?: number
+  longitude?: number
+  address?: string
+  
+  // Contact
+  contact?: {
+    name: string
+    phone?: string
+    email?: string
+    organization?: string
+  }
+  
+  // Product
   product?: {
     id: string
     name: string
@@ -92,17 +143,56 @@ export interface MessageContent {
     currency: string
     image_url?: string
     url?: string
+    description?: string
   }
+  product_id?: string
+  
+  // Interactive elements
   buttons?: Array<{
     type: 'url' | 'postback' | 'phone' | 'email'
     title: string
     payload: string
   }>
+  
   quick_replies?: Array<{
     title: string
     payload: string
     image_url?: string
   }>
+  
+  // Rich message / Template
+  template_type?: string
+  elements?: Array<any>
+  
+  // Carousel
+  carousel?: Array<{
+    title: string
+    subtitle?: string
+    image_url?: string
+    buttons?: Array<{
+      type: string
+      title: string
+      payload: string
+    }>
+  }>
+  
+  // Facebook specific - attachments format
+  attachments?: Array<{
+    type: string
+    payload: {
+      url?: string
+      sticker_id?: string
+      coordinates?: { lat: number; long: number }
+      [key: string]: any
+    }
+  }>
+  
+  // Additional metadata
+  caption?: string
+  is_sensitive?: boolean
+  width?: number
+  height?: number
+  size?: number
 }
 
 export interface QuickReply {

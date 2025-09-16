@@ -36,9 +36,9 @@ function transformMessageContent(message: Message): any {
     const attachment = content.attachments[0]
     const payload = attachment.payload || {}
     
-    // Check if it's a sticker (has sticker_id)
-    if (payload.sticker_id && attachment.type === 'image') {
-      // It's a sticker
+    // IMPORTANT: Check if it's a sticker (has sticker_id in payload)
+    if (payload.sticker_id) {
+      // It's a sticker - return sticker format
       return {
         sticker_id: payload.sticker_id,
         sticker_url: payload.url,
@@ -71,6 +71,45 @@ function transformMessageContent(message: Message): any {
 }
 
 /**
+ * Detect actual message type from content
+ */
+function detectMessageType(message: Message, platform: Platform): string {
+  const content = message.content || {}
+  const messageType = message.message_type
+  
+  // Auto-detect from Facebook/Instagram attachments
+  if ((platform === 'facebook' || platform === 'instagram') && content.attachments) {
+    const attachment = content.attachments[0]
+    if (attachment) {
+      const payload = attachment.payload || {}
+      
+      // Check for sticker
+      if (payload.sticker_id) {
+        return 'sticker'
+      }
+      
+      // Check attachment type
+      switch (attachment.type) {
+        case 'image':
+          return 'image'
+        case 'video':
+          return 'video'
+        case 'audio':
+          return 'audio'
+        case 'file':
+          return 'file'
+        case 'location':
+          return 'location'
+        default:
+          return messageType
+      }
+    }
+  }
+  
+  return messageType
+}
+
+/**
  * Central message renderer that handles all message types
  */
 export function MessageRenderer({
@@ -87,16 +126,8 @@ export function MessageRenderer({
   // Transform content to handle attachments format
   const transformedContent = transformMessageContent(message)
   
-  // Detect actual message type from content if needed
-  let messageType = message.message_type
-  
-  // Auto-detect sticker from Facebook attachments
-  if (platform === 'facebook' || platform === 'instagram') {
-    if (transformedContent.sticker_id || 
-        (message.content?.attachments?.[0]?.payload?.sticker_id)) {
-      messageType = 'sticker'
-    }
-  }
+  // Detect actual message type
+  const messageType = detectMessageType(message, platform)
   
   // Check if platform supports this message type
   const isSupported = isPlatformSupported(platform, messageType)
@@ -107,7 +138,7 @@ export function MessageRenderer({
         "px-4 py-2 rounded-2xl bg-muted/50 italic text-muted-foreground",
         className
       )}>
-        Message type "{messageType}" not supported on {platform}
+        Message type &quot;{messageType}&quot; not supported on {platform}
       </div>
     )
   }
@@ -115,6 +146,11 @@ export function MessageRenderer({
   // Render based on message type
   switch (messageType) {
     case 'text':
+      // Check if it's actually empty text (like when only attachment is sent)
+      if (!transformedContent.text && message.content?.attachments) {
+        // This is likely an attachment-only message, already handled above
+        return null
+      }
       return (
         <TextMessage
           content={transformedContent}
@@ -251,6 +287,7 @@ export function MessageRenderer({
 
 /**
  * Check if platform supports specific message type
+ * Updated to support receiving all types but limit sending
  */
 function isPlatformSupported(platform: Platform, messageType: string): boolean {
   const supportMatrix: Record<Platform, string[]> = {

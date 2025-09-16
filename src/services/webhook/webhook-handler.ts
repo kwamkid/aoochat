@@ -1,387 +1,592 @@
-// src/services/webhook/webhook-handler.ts
+// src/services/webhook/webhook-handler-v2.ts
+// Version ที่แก้ปัญหา cookies outside request scope
 
-import { Platform } from '@/types/conversation.types'
-import { 
-  WebhookEvent, 
-  WebhookResponse, 
-  ProcessedWebhookData,
-  WebhookProcessor 
-} from '@/types/webhook.types'
-import { MetaWebhookProcessor } from './processors/meta-processor'
-import { LineWebhookProcessor } from './processors/line-processor'
-import { WhatsAppWebhookProcessor } from './processors/whatsapp-processor'
 import { createClient } from '@/lib/supabase/server'
-import { headers } from 'next/headers'
+import { FacebookMessageProcessor } from './processors/facebook-processor'
+import type { Platform, MessageType } from '@/types/conversation.types'
+import crypto from 'crypto'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+interface WebhookVerifyParams {
+  'hub.mode'?: string | null
+  'hub.verify_token'?: string | null
+  'hub.challenge'?: string | null
+  [key: string]: string | null | undefined
+}
+
+interface WebhookHeaders {
+  'x-hub-signature'?: string
+  'x-hub-signature-256'?: string
+  'x-line-signature'?: string
+  [key: string]: string | undefined
+}
 
 export class WebhookHandler {
-  private processors: Map<Platform, WebhookProcessor>
-  
-  constructor() {
-    this.processors = new Map()
-    this.registerProcessors()
-  }
-  
-  private registerProcessors() {
-    // Register platform-specific processors
-    this.processors.set('facebook', new MetaWebhookProcessor('facebook'))
-    this.processors.set('instagram', new MetaWebhookProcessor('instagram'))
-    this.processors.set('line', new LineWebhookProcessor())
-    this.processors.set('whatsapp', new WhatsAppWebhookProcessor())
-  }
+  // ไม่เก็บ supabase client ไว้ใน class
   
   /**
    * Verify webhook challenge (for initial setup)
    */
   async verifyChallenge(
-    platform: Platform, 
-    params: any, 
-    requestHeaders: any
-  ): Promise<any> {
-    const processor = this.processors.get(platform)
-    if (!processor) {
-      throw new Error(`No processor found for platform: ${platform}`)
-    }
+    platform: Platform,
+    params: WebhookVerifyParams,
+    headers?: WebhookHeaders
+  ): Promise<string | null> {
+    console.log(`[WebhookHandler] Verifying ${platform} webhook challenge`)
     
-    // Platform-specific verification
     switch (platform) {
       case 'facebook':
       case 'instagram':
-        // Meta platforms use hub.challenge verification
-        const mode = params['hub.mode']
-        const token = params['hub.verify_token']
-        const challenge = params['hub.challenge']
-        
-        if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
-          return challenge
-        }
-        throw new Error('Invalid verification token')
-        
+        return this.verifyFacebookChallenge(params)
       case 'line':
         // LINE doesn't use challenge verification
-        return { success: true }
-        
+        return null
       case 'whatsapp':
-        // WhatsApp uses same as Meta
-        const waMode = params['hub.mode']
-        const waToken = params['hub.verify_token']
-        const waChallenge = params['hub.challenge']
-        
-        if (waMode === 'subscribe' && waToken === process.env.WHATSAPP_VERIFY_TOKEN) {
-          return waChallenge
-        }
-        throw new Error('Invalid verification token')
-        
+        return this.verifyWhatsAppChallenge(params)
       default:
         throw new Error(`Unsupported platform: ${platform}`)
     }
   }
-  
+
   /**
-   * Process incoming webhook
+   * Verify Facebook/Instagram webhook challenge
+   */
+  private verifyFacebookChallenge(params: WebhookVerifyParams): string | null {
+    const mode = params['hub.mode']
+    const token = params['hub.verify_token']
+    const challenge = params['hub.challenge']
+    
+    const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || 'aoochat_verify_token_2024'
+    
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('[WebhookHandler] Facebook webhook verified successfully')
+      return challenge || ''
+    }
+    
+    console.error('[WebhookHandler] Facebook webhook verification failed')
+    return null
+  }
+
+  /**
+   * Verify WhatsApp webhook challenge
+   */
+  private verifyWhatsAppChallenge(params: WebhookVerifyParams): string | null {
+    const mode = params['hub.mode']
+    const token = params['hub.verify_token']
+    const challenge = params['hub.challenge']
+    
+    const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'aoochat_whatsapp_2024'
+    
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('[WebhookHandler] WhatsApp webhook verified successfully')
+      return challenge || ''
+    }
+    
+    console.error('[WebhookHandler] WhatsApp webhook verification failed')
+    return null
+  }
+
+  /**
+   * Verify webhook signature
+   */
+  verifySignature(
+    platform: Platform,
+    payload: string,
+    signature?: string
+  ): boolean {
+    if (!signature) return false
+    
+    switch (platform) {
+      case 'facebook':
+      case 'instagram':
+        return this.verifyFacebookSignature(payload, signature)
+      case 'line':
+        return this.verifyLineSignature(payload, signature)
+      case 'whatsapp':
+        return this.verifyWhatsAppSignature(payload, signature)
+      default:
+        return false
+    }
+  }
+
+  /**
+   * Verify Facebook signature
+   */
+  private verifyFacebookSignature(payload: string, signature: string): boolean {
+    const APP_SECRET = process.env.FACEBOOK_APP_SECRET || ''
+    const expectedSignature = crypto
+      .createHmac('sha256', APP_SECRET)
+      .update(payload)
+      .digest('hex')
+    
+    return signature === `sha256=${expectedSignature}`
+  }
+
+  /**
+   * Verify LINE signature
+   */
+  private verifyLineSignature(payload: string, signature: string): boolean {
+    const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || ''
+    const expectedSignature = crypto
+      .createHmac('sha256', CHANNEL_SECRET)
+      .update(payload)
+      .digest('base64')
+    
+    return signature === expectedSignature
+  }
+
+  /**
+   * Verify WhatsApp signature
+   */
+  private verifyWhatsAppSignature(payload: string, signature: string): boolean {
+    const APP_SECRET = process.env.WHATSAPP_APP_SECRET || ''
+    const expectedSignature = crypto
+      .createHmac('sha256', APP_SECRET)
+      .update(payload)
+      .digest('hex')
+    
+    return signature === `sha256=${expectedSignature}`
+  }
+
+  /**
+   * Process webhook based on platform
+   * ✅ รับ supabase client มาจากข้างนอก
    */
   async processWebhook(
-    platform: Platform,
-    payload: any,
-    requestHeaders: any
-  ): Promise<WebhookResponse> {
-    const processor = this.processors.get(platform)
-    if (!processor) {
-      throw new Error(`No processor found for platform: ${platform}`)
-    }
+    platform: Platform, 
+    payload: any, 
+    supabaseClient?: SupabaseClient
+  ) {
+    console.log(`[WebhookHandler] Processing ${platform} webhook`)
     
-    try {
-      // Verify webhook signature
-      const isValid = processor.verify(payload, requestHeaders)
-      if (!isValid) {
-        throw new Error('Invalid webhook signature')
-      }
-      
-      // Process webhook data
-      const processedData = await processor.process(payload)
-      
-      // Store in database
-      await this.storeWebhookData(processedData)
-      
-      // Trigger real-time update
-      await this.triggerRealtimeUpdate(processedData)
-      
-      // Process business logic
-      await this.processBusinessLogic(processedData)
-      
-      return {
-        success: true,
-        message: 'Webhook processed successfully'
-      }
-    } catch (error) {
-      console.error('Webhook processing error:', error)
-      
-      // Log error to database
-      await this.logWebhookError(platform, payload, error)
-      
-      return {
-        success: false,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      }
+    // สร้าง supabase client ถ้าไม่ได้ส่งมา
+    const supabase = supabaseClient || await createClient() // ← เพิ่ม await
+    
+    switch (platform) {
+      case 'facebook':
+      case 'instagram':
+        return this.processFacebookWebhook(payload, supabase)
+      case 'line':
+        return this.processLineWebhook(payload, supabase)
+      case 'whatsapp':
+        return this.processWhatsAppWebhook(payload, supabase)
+      case 'shopee':
+        return this.processShopeeWebhook(payload, supabase)
+      case 'lazada':
+        return this.processLazadaWebhook(payload, supabase)
+      case 'tiktok':
+        return this.processTikTokWebhook(payload, supabase)
+      default:
+        throw new Error(`Unsupported platform: ${platform}`)
     }
   }
-  
+
   /**
-   * Store webhook data in database
+   * Process Facebook/Instagram webhook
    */
-  private async storeWebhookData(data: ProcessedWebhookData) {
-    try {
-      // Use createClient with service role to bypass RLS
-      const supabase = await createClient()
-      
-      // For webhook operations, we need to bypass RLS
-      // Check if we're using the service role key
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-      
-      if (!supabaseServiceKey) {
-        console.error('SUPABASE_SERVICE_ROLE_KEY not configured - webhooks may fail due to RLS')
-      }
-      
-      // Create a service client that bypasses RLS
-      const { createClient: createServiceClient } = await import('@supabase/supabase-js')
-      const serviceClient = createServiceClient(supabaseUrl, supabaseServiceKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
-      
-      // Log the data we're trying to store
-      console.log('Storing webhook data:', {
-        platform: data.platform,
-        conversationId: data.conversationId,
-        customerId: data.customerId,
-        messageType: data.messageType
-      })
-      
-      // Check if conversation exists
-      const { data: existingConv, error: fetchError } = await serviceClient
-        .from('conversations')
-        .select('id')
-        .eq('platform', data.platform)
-        .eq('platform_conversation_id', data.conversationId)
-        .single()
-      
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        // PGRST116 = no rows found, which is ok
-        console.error('Error fetching conversation:', fetchError)
-      }
-      
-      let conversationId: string
-      
-      if (existingConv) {
-        conversationId = existingConv.id
-        console.log('Found existing conversation:', conversationId)
-        
-        // Update last message time
-        const { error: updateError } = await serviceClient
-          .from('conversations')
-          .update({
-            last_message_at: data.timestamp,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', conversationId)
-        
-        if (updateError) {
-          console.error('Error updating conversation:', updateError)
-        }
-      } else {
-        // Create new conversation
-        console.log('Creating new conversation...')
-        
-        const conversationData: any = {
-          platform: data.platform,
-          platform_conversation_id: data.conversationId,
-          status: 'new',
-          priority: 'normal',
-          last_message_at: data.timestamp,
-          message_count: 1,
-          unread_count: 1,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
-        
-        const { data: newConv, error } = await serviceClient
-          .from('conversations')
-          .insert(conversationData)
-          .select()
-          .single()
-        
-        if (error) {
-          console.error('Error creating conversation:', error)
-          console.warn('Continuing without conversation record')
-          return
-        }
-        
-        if (!newConv) {
-          console.error('No conversation returned after insert')
-          return
-        }
-        
-        conversationId = newConv.id
-        console.log('Created new conversation:', conversationId)
-      }
-      
-      // Store message if present
-      if (data.messageId && data.messageType) {
-        console.log('Storing message...')
-        
-        const messageData: any = {
-          conversation_id: conversationId,
-          platform_message_id: data.messageId,
-          sender_type: 'customer',
-          sender_id: data.customerId,
-          sender_name: data.customerName || 'Customer',
-          message_type: data.messageType,
-          content: data.messageContent || {},
-          status: 'delivered',
-          is_private: false,
-          is_automated: false,
-          created_at: data.timestamp,
-          updated_at: data.timestamp
-        }
-        
-        const { error: messageError } = await serviceClient
-          .from('messages')
-          .insert(messageData)
-        
-        if (messageError) {
-          console.error('Error storing message:', messageError)
-        } else {
-          console.log('Message stored successfully')
+  private async processFacebookWebhook(payload: any, supabase: SupabaseClient) {
+    const results = []
+    
+    for (const entry of payload.entry || []) {
+      // Handle messaging events
+      if (entry.messaging) {
+        for (const messaging of entry.messaging) {
+          const result = await this.processFacebookMessaging(messaging, supabase)
+          if (result) results.push(result)
         }
       }
       
-      // Update or create customer with service client
-      await this.updateCustomerData(data, serviceClient)
-      
-    } catch (error) {
-      console.error('Error in storeWebhookData:', error)
-      // Don't throw - we want to continue processing even if storage fails
-    }
-  }
-  
-  /**
-   * Update customer data
-   */
-  private async updateCustomerData(data: ProcessedWebhookData, serviceClient?: any) {
-    try {
-      // Use provided service client or create new one
-      if (!serviceClient) {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-        const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-        const { createClient: createServiceClient } = await import('@supabase/supabase-js')
-        serviceClient = createServiceClient(supabaseUrl, supabaseServiceKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
-      }
-      
-      console.log('Updating customer data:', {
-        customerId: data.customerId,
-        customerName: data.customerName,
-        platform: data.platform
-      })
-      
-      const customerData: any = {
-        name: data.customerName || `Customer ${data.customerId}`,
-        platform_identities: {
-          [data.platform]: {
-            id: data.customerId,
-            displayName: data.customerName
+      // Handle Instagram mentions/comments (future)
+      if (entry.changes) {
+        for (const change of entry.changes) {
+          if (change.field === 'comments' || change.field === 'mentions') {
+            // Process Instagram comment/mention
+            console.log('[WebhookHandler] Instagram activity:', change)
           }
-        },
-        first_contact_at: data.timestamp,
-        last_contact_at: data.timestamp,
-        total_conversations: 1,
-        total_messages: 1,
-        engagement_score: 50,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        }
       }
-      
-      const { data: customer, error: insertError } = await serviceClient
-        .from('customers')
-        .insert(customerData)
-        .select()
-        .single()
-      
-      if (insertError) {
-        console.log('Customer might exist, skipping creation:', insertError.message)
-      } else {
-        console.log('Customer created/updated successfully:', customer?.id)
-      }
-      
-    } catch (error) {
-      console.error('Error in updateCustomerData:', error)
     }
+    
+    return results
   }
-  
+
   /**
-   * Trigger real-time update via Supabase Realtime or WebSocket
+   * Process single Facebook messaging event
    */
-  private async triggerRealtimeUpdate(data: ProcessedWebhookData) {
-    // This would trigger real-time updates to connected clients
-    // Implementation depends on your real-time solution (Supabase Realtime, Pusher, Socket.io, etc.)
-    
-    const supabase = await createClient()
-    
-    // Broadcast to channel
-    const channel = supabase.channel('conversations')
-    channel.send({
-      type: 'broadcast',
-      event: 'new_message',
-      payload: {
-        platform: data.platform,
-        conversationId: data.conversationId,
-        messageId: data.messageId,
-        timestamp: data.timestamp
-      }
+  private async processFacebookMessaging(messaging: any, supabase: SupabaseClient) {
+    const senderId = messaging.sender?.id
+    const recipientId = messaging.recipient?.id
+
+    console.log('[DEBUG] processFacebookMessaging called with:', {
+      hasMessage: !!messaging.message,
+      isEcho: messaging.message?.is_echo,
+      attachments: messaging.message?.attachments
     })
+    
+    // Handle incoming message
+    if (messaging.message && !messaging.message.is_echo) {
+      // ✅ Use processor to detect correct message type
+      const processed = FacebookMessageProcessor.processMessage(messaging.message)
+      
+      console.log(`[WebhookHandler] Processed message:`, {
+        type: processed.messageType,
+        hasStickerId: !!processed.content.sticker_id,
+        hasMediaUrl: !!processed.content.media_url,
+        text: processed.content.text?.substring(0, 50)
+      })
+      
+      // Get or create customer
+      const customer = await this.getOrCreateCustomer('facebook', senderId, supabase)
+      
+      // Get or create conversation
+      const conversation = await this.getOrCreateConversation(
+        'facebook',
+        customer.id,
+        recipientId,
+        senderId,
+        supabase
+      )
+      
+      // Save message with CORRECT message_type
+      const message = await this.saveMessage({
+        conversation_id: conversation.id,
+        platform_message_id: processed.platformMessageId,
+        message_type: processed.messageType, // ✅ ใช้ type ที่ถูกต้อง!
+        content: processed.content,
+        sender_type: 'customer',
+        sender_id: senderId,
+        sender_name: customer.name || `Customer ${senderId}`,
+        status: 'delivered'
+      }, supabase)
+      
+      // Update conversation
+      await this.updateConversationLastMessage(conversation.id, message, supabase)
+      
+      return {
+        type: 'message',
+        conversationId: conversation.id,
+        messageId: message.id,
+        messageType: processed.messageType
+      }
+    }
+    
+    // Handle echo (our sent message)
+    if (messaging.message?.is_echo) {
+      console.log('[WebhookHandler] Echo message:', messaging.message.mid)
+      // Update our sent message status
+      await this.updateMessageStatus([messaging.message.mid], 'sent', supabase)
+    }
+    
+    // Handle postback (button clicks)
+    if (messaging.postback) {
+      const processed = FacebookMessageProcessor.processPostback(messaging.postback)
+      console.log('[WebhookHandler] Postback:', processed)
+      
+      // Save as message
+      const customer = await this.getOrCreateCustomer('facebook', senderId, supabase)
+      const conversation = await this.getOrCreateConversation(
+        'facebook',
+        customer.id,
+        recipientId,
+        senderId,
+        supabase
+      )
+      
+      const message = await this.saveMessage({
+        conversation_id: conversation.id,
+        message_type: 'text',
+        content: {
+          text: `Clicked: ${processed.title}`,
+          postback: processed.payload
+        },
+        sender_type: 'customer',
+        sender_id: senderId,
+        sender_name: customer.name || `Customer ${senderId}`,
+        status: 'delivered'
+      }, supabase)
+      
+      return {
+        type: 'postback',
+        conversationId: conversation.id,
+        messageId: message.id
+      }
+    }
+    
+    // Handle delivery confirmation
+    if (messaging.delivery) {
+      const processed = FacebookMessageProcessor.processDelivery(messaging.delivery)
+      console.log('[WebhookHandler] Delivery:', processed)
+      await this.updateMessageStatus(processed.messageIds, 'delivered', supabase)
+    }
+    
+    // Handle read confirmation
+    if (messaging.read) {
+      const processed = FacebookMessageProcessor.processRead(messaging.read)
+      console.log('[WebhookHandler] Read:', processed)
+      await this.markMessagesAsRead(senderId, processed.watermark, supabase)
+    }
+    
+    return null
   }
-  
+
   /**
-   * Process business logic (auto-reply, routing, etc.)
+   * Process LINE webhook (placeholder)
    */
-  private async processBusinessLogic(data: ProcessedWebhookData) {
-    // Check for auto-reply rules
-    await this.checkAutoReply(data)
-    
-    // Check for routing rules
-    await this.checkRoutingRules(data)
-    
-    // Check for automation triggers
-    await this.checkAutomationTriggers(data)
+  private async processLineWebhook(payload: any, supabase: SupabaseClient) {
+    // TODO: Implement LINE webhook processing
+    return []
   }
-  
-  private async checkAutoReply(data: ProcessedWebhookData) {
-    // Implementation for auto-reply logic
-    // Check business hours, keywords, etc.
-  }
-  
-  private async checkRoutingRules(data: ProcessedWebhookData) {
-    // Implementation for conversation routing
-    // Assign to team/agent based on rules
-  }
-  
-  private async checkAutomationTriggers(data: ProcessedWebhookData) {
-    // Implementation for automation flows
-    // Trigger workflows based on conditions
-  }
-  
+
   /**
-   * Log webhook errors for debugging
+   * Process WhatsApp webhook (placeholder)
    */
-  private async logWebhookError(platform: Platform, payload: any, error: any) {
-    const supabase = await createClient()
+  private async processWhatsAppWebhook(payload: any, supabase: SupabaseClient) {
+    // TODO: Implement WhatsApp webhook processing
+    return []
+  }
+
+  /**
+   * Process Shopee webhook (placeholder)
+   */
+  private async processShopeeWebhook(payload: any, supabase: SupabaseClient) {
+    console.log('[WebhookHandler] Shopee webhook received:', payload)
+    return []
+  }
+
+  /**
+   * Process Lazada webhook (placeholder)
+   */
+  private async processLazadaWebhook(payload: any, supabase: SupabaseClient) {
+    console.log('[WebhookHandler] Lazada webhook received:', payload)
+    return []
+  }
+
+  /**
+   * Process TikTok webhook (placeholder)
+   */
+  private async processTikTokWebhook(payload: any, supabase: SupabaseClient) {
+    console.log('[WebhookHandler] TikTok webhook received:', payload)
+    return []
+  }
+
+  /**
+   * Get or create customer
+   */
+  private async getOrCreateCustomer(
+    platform: Platform, 
+    platformUserId: string,
+    supabase: SupabaseClient
+  ) {
+    // Check existing customer
+    const { data: existingCustomer } = await supabase
+      .from('customers')
+      .select('*')
+      .eq(`platform_identities->${platform}->id`, platformUserId)
+      .single()
     
-    await supabase
-      .from('webhook_logs')
+    if (existingCustomer) {
+      return existingCustomer
+    }
+    
+    // Create new customer
+    const { data: newCustomer, error } = await supabase
+      .from('customers')
       .insert({
-        platform,
-        payload,
-        error: error instanceof Error ? error.message : String(error),
+        name: `${platform.charAt(0).toUpperCase() + platform.slice(1)} User`,
+        platform_identities: {
+          [platform]: { id: platformUserId }
+        },
+        organization_id: await this.getOrganizationId(platform, supabase),
+        last_contact_at: new Date().toISOString(),
         created_at: new Date().toISOString()
       })
+      .select()
+      .single()
+    
+    if (error) {
+      console.error('[WebhookHandler] Error creating customer:', error)
+      throw error
+    }
+    
+    console.log('[WebhookHandler] Created new customer:', newCustomer.id)
+    return newCustomer
+  }
+
+  /**
+   * Get or create conversation
+   */
+  private async getOrCreateConversation(
+    platform: Platform,
+    customerId: string,
+    pageId: string,
+    userId: string,
+    supabase: SupabaseClient
+  ) {
+    // Check existing open conversation
+    const { data: existingConv } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('platform', platform)
+      .eq('customer_id', customerId)
+      .eq('status', 'open')
+      .single()
+    
+    if (existingConv) {
+      return existingConv
+    }
+    
+    // Create new conversation
+    const { data: newConv, error } = await supabase
+      .from('conversations')
+      .insert({
+        platform,
+        customer_id: customerId,
+        platform_conversation_id: `${pageId}_${userId}`,
+        status: 'open',
+        priority: 'normal',
+        organization_id: await this.getOrganizationId(platform, supabase),
+        last_message_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single()
+    
+    if (error) {
+      console.error('[WebhookHandler] Error creating conversation:', error)
+      throw error
+    }
+    
+    console.log('[WebhookHandler] Created new conversation:', newConv.id)
+    return newConv
+  }
+
+  /**
+   * Save message to database
+   */
+  private async saveMessage(messageData: any, supabase: SupabaseClient) {
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        ...messageData,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single()
+    
+    if (error) {
+      console.error('[WebhookHandler] Error saving message:', error)
+      throw error
+    }
+    
+    console.log(`[WebhookHandler] Saved ${messageData.message_type} message:`, data.id)
+    return data
+  }
+
+  /**
+   * Update conversation with last message
+   */
+  private async updateConversationLastMessage(
+    conversationId: string, 
+    message: any,
+    supabase: SupabaseClient
+  ) {
+    const { data: conversation } = await supabase
+      .from('conversations')
+      .select('message_count, unread_count')
+      .eq('id', conversationId)
+      .single()
+    
+    const { error } = await supabase
+      .from('conversations')
+      .update({
+        last_message_at: message.created_at || new Date().toISOString(),
+        message_count: (conversation?.message_count || 0) + 1,
+        unread_count: (conversation?.unread_count || 0) + 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', conversationId)
+    
+    if (error) {
+      console.error('[WebhookHandler] Error updating conversation:', error)
+    }
+  }
+
+  /**
+   * Get organization ID for platform
+   */
+  private async getOrganizationId(
+    platform: Platform,
+    supabase: SupabaseClient
+  ): Promise<string> {
+    // Get from platform_accounts
+    const { data } = await supabase
+      .from('platform_accounts')
+      .select('organization_id')
+      .eq('platform', platform)
+      .eq('is_active', true)
+      .single()
+    
+    return data?.organization_id || process.env.DEFAULT_ORG_ID || 'default-org-id'
+  }
+
+  /**
+   * Update message status
+   */
+  private async updateMessageStatus(
+    messageIds: string[], 
+    status: string,
+    supabase: SupabaseClient
+  ) {
+    if (!messageIds || messageIds.length === 0) return
+    
+    const updateData: any = { 
+      status,
+      updated_at: new Date().toISOString()
+    }
+    
+    if (status === 'delivered') {
+      updateData.delivered_at = new Date().toISOString()
+    } else if (status === 'read') {
+      updateData.read_at = new Date().toISOString()
+    }
+    
+    const { error } = await supabase
+      .from('messages')
+      .update(updateData)
+      .in('platform_message_id', messageIds)
+    
+    if (error) {
+      console.error('[WebhookHandler] Error updating message status:', error)
+    }
+  }
+
+  /**
+   * Mark messages as read
+   */
+  private async markMessagesAsRead(
+    senderId: string, 
+    watermark: number,
+    supabase: SupabaseClient
+  ) {
+    // Update all messages before watermark timestamp as read
+    const { error } = await supabase
+      .from('messages')
+      .update({ 
+        status: 'read',
+        read_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('sender_id', senderId)
+      .lte('created_at', new Date(watermark).toISOString())
+      .eq('sender_type', 'agent') // Only mark agent messages as read
+      .in('status', ['sent', 'delivered'])
+    
+    if (error) {
+      console.error('[WebhookHandler] Error marking messages as read:', error)
+    }
   }
 }
 
-// Export singleton instance
+// Export instance ใหม่ทุกครั้ง (ไม่ใช่ singleton)
 export const webhookHandler = new WebhookHandler()
