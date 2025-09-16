@@ -34,7 +34,8 @@ import {
   AlertCircle,
   ExternalLink,
   Copy,
-  Shield
+  Shield,
+  RefreshCw
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
@@ -43,6 +44,7 @@ import type { Customer, Conversation, Platform } from "@/types/conversation.type
 import { usePlatformInfo, usePlatformTheme } from '@/hooks/use-platform-info'
 import { PlatformAvatar } from './platform-avatar'
 import { toast } from "sonner"
+import { customerProfileSyncService } from '@/services/customers/profile-sync.service'
 
 // Platform Icon Component
 const PlatformIcon = ({ platform, className }: { platform: Platform; className?: string }) => {
@@ -121,6 +123,7 @@ export function CustomerInfo({ customer, conversation, onClose }: CustomerInfoPr
   const [customerTags, setCustomerTags] = useState(customer.tags)
   const [notes, setNotes] = useState("")
   const [editingNotes, setEditingNotes] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   
   // Get platform info
   const pageId = conversation.platform_conversation_id?.split('_')[0]
@@ -155,6 +158,27 @@ export function CustomerInfo({ customer, conversation, onClose }: CustomerInfoPr
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text)
     toast.success(`${label} copied to clipboard`)
+  }
+
+  const handleSyncProfile = async () => {
+    setSyncing(true)
+    
+    try {
+      const success = await customerProfileSyncService.syncCustomerProfile(customer.id)
+      
+      if (success) {
+        toast.success('Profile synced successfully')
+        // Reload page to get updated data
+        window.location.reload()
+      } else {
+        toast.error('Failed to sync profile')
+      }
+    } catch (error) {
+      console.error('Error syncing profile:', error)
+      toast.error('Error syncing profile')
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const getEngagementColor = (score: number) => {
@@ -295,6 +319,17 @@ export function CustomerInfo({ customer, conversation, onClose }: CustomerInfoPr
             <UserCheck className="w-4 h-4" />
             Assign
           </button>
+          
+          {/* Sync Profile Button */}
+          <button
+            onClick={handleSyncProfile}
+            disabled={syncing}
+            className="py-1.5 px-3 bg-muted rounded-lg text-sm hover:bg-muted/80 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+          >
+            <RefreshCw className={cn("w-4 h-4", syncing && "animate-spin")} />
+            {syncing ? 'Syncing...' : 'Sync'}
+          </button>
+          
           <button className="flex-1 py-1.5 px-3 bg-muted rounded-lg text-sm hover:bg-muted/80 transition-colors flex items-center justify-center gap-1">
             <Shield className="w-4 h-4" />
             VIP

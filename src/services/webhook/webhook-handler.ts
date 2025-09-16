@@ -1,5 +1,5 @@
-// src/services/webhook/webhook-handler-v2.ts
-// Version ที่แก้ปัญหา cookies outside request scope
+// src/services/webhook/webhook-handler.ts
+// Version ที่แก้ปัญหา organization_id และ customer_id
 
 import { createClient } from '@/lib/supabase/server'
 import { FacebookMessageProcessor } from './processors/facebook-processor'
@@ -22,7 +22,6 @@ interface WebhookHeaders {
 }
 
 export class WebhookHandler {
-  // ไม่เก็บ supabase client ไว้ใน class
   
   /**
    * Verify webhook challenge (for initial setup)
@@ -150,7 +149,6 @@ export class WebhookHandler {
 
   /**
    * Process webhook based on platform
-   * ✅ รับ supabase client มาจากข้างนอก
    */
   async processWebhook(
     platform: Platform, 
@@ -159,8 +157,8 @@ export class WebhookHandler {
   ) {
     console.log(`[WebhookHandler] Processing ${platform} webhook`)
     
-    // สร้าง supabase client ถ้าไม่ได้ส่งมา
-    const supabase = supabaseClient || await createClient() // ← เพิ่ม await
+    // Create supabase client if not provided
+    const supabase = supabaseClient || await createClient()
     
     switch (platform) {
       case 'facebook':
@@ -200,7 +198,6 @@ export class WebhookHandler {
       if (entry.changes) {
         for (const change of entry.changes) {
           if (change.field === 'comments' || change.field === 'mentions') {
-            // Process Instagram comment/mention
             console.log('[WebhookHandler] Instagram activity:', change)
           }
         }
@@ -215,28 +212,38 @@ export class WebhookHandler {
    */
   private async processFacebookMessaging(messaging: any, supabase: SupabaseClient) {
     const senderId = messaging.sender?.id
-    const recipientId = messaging.recipient?.id
+    const recipientId = messaging.recipient?.id // This is the Facebook Page ID
 
-    console.log('[DEBUG] processFacebookMessaging called with:', {
+    console.log('[WebhookHandler] Processing Facebook message:', {
+      senderId,
+      recipientId,
       hasMessage: !!messaging.message,
-      isEcho: messaging.message?.is_echo,
-      attachments: messaging.message?.attachments
+      isEcho: messaging.message?.is_echo
     })
     
-    // Handle incoming message
+    // Handle incoming message (not echo)
     if (messaging.message && !messaging.message.is_echo) {
-      // ✅ Use processor to detect correct message type
+      // Process message to detect type
       const processed = FacebookMessageProcessor.processMessage(messaging.message)
       
-      console.log(`[WebhookHandler] Processed message:`, {
+      console.log(`[WebhookHandler] Message processed:`, {
         type: processed.messageType,
-        hasStickerId: !!processed.content.sticker_id,
-        hasMediaUrl: !!processed.content.media_url,
-        text: processed.content.text?.substring(0, 50)
+        platformMessageId: processed.platformMessageId
       })
       
-      // Get or create customer
-      const customer = await this.getOrCreateCustomer('facebook', senderId, supabase)
+      // Get organization ID first using the Facebook Page ID
+      const organizationId = await this.getOrganizationId('facebook', supabase, recipientId)
+      console.log('[WebhookHandler] Organization ID:', organizationId)
+      
+      // Get or create customer with organization ID
+      const customer = await this.getOrCreateCustomer(
+        'facebook', 
+        senderId, 
+        supabase, 
+        organizationId,
+        recipientId
+      )
+      console.log('[WebhookHandler] Customer:', { id: customer.id, name: customer.name })
       
       // Get or create conversation
       const conversation = await this.getOrCreateConversation(
@@ -244,14 +251,16 @@ export class WebhookHandler {
         customer.id,
         recipientId,
         senderId,
-        supabase
+        supabase,
+        organizationId
       )
+      console.log('[WebhookHandler] Conversation:', { id: conversation.id })
       
-      // Save message with CORRECT message_type
+      // Save message
       const message = await this.saveMessage({
         conversation_id: conversation.id,
         platform_message_id: processed.platformMessageId,
-        message_type: processed.messageType, // ✅ ใช้ type ที่ถูกต้อง!
+        message_type: processed.messageType,
         content: processed.content,
         sender_type: 'customer',
         sender_id: senderId,
@@ -273,7 +282,6 @@ export class WebhookHandler {
     // Handle echo (our sent message)
     if (messaging.message?.is_echo) {
       console.log('[WebhookHandler] Echo message:', messaging.message.mid)
-      // Update our sent message status
       await this.updateMessageStatus([messaging.message.mid], 'sent', supabase)
     }
     
@@ -282,14 +290,15 @@ export class WebhookHandler {
       const processed = FacebookMessageProcessor.processPostback(messaging.postback)
       console.log('[WebhookHandler] Postback:', processed)
       
-      // Save as message
-      const customer = await this.getOrCreateCustomer('facebook', senderId, supabase)
+      const organizationId = await this.getOrganizationId('facebook', supabase, recipientId)
+      const customer = await this.getOrCreateCustomer('facebook', senderId, supabase, organizationId, recipientId)
       const conversation = await this.getOrCreateConversation(
         'facebook',
         customer.id,
         recipientId,
         senderId,
-        supabase
+        supabase,
+        organizationId
       )
       
       const message = await this.saveMessage({
@@ -370,94 +379,310 @@ export class WebhookHandler {
   }
 
   /**
+   * Get organization ID for platform
+   * FIXED: Now properly uses pageId to find the correct organization
+   */
+  private async getOrganizationId(
+    platform: Platform,
+    supabase: SupabaseClient,
+    pageId?: string
+  ): Promise<string> {
+    try {
+      let query = supabase
+        .from('platform_accounts')
+        .select('organization_id')
+        .eq('platform', platform)
+        .eq('is_active', true)
+      
+      // For Facebook/Instagram, match by page ID (account_id)
+      if (pageId && (platform === 'facebook' || platform === 'instagram')) {
+        console.log(`[WebhookHandler] Looking for organization with pageId: ${pageId}`)
+        query = query.eq('account_id', pageId)
+      }
+      
+      const { data, error } = await query.single()
+      
+      if (error || !data?.organization_id) {
+        console.error(`[WebhookHandler] No platform account found for ${platform} pageId: ${pageId}`)
+        console.error('Error:', error)
+        
+        // Try to get any active account for this platform as fallback
+        const { data: fallbackData } = await supabase
+          .from('platform_accounts')
+          .select('organization_id')
+          .eq('platform', platform)
+          .eq('is_active', true)
+          .limit(1)
+          .single()
+        
+        if (fallbackData?.organization_id) {
+          console.warn(`[WebhookHandler] Using fallback organization: ${fallbackData.organization_id}`)
+          return fallbackData.organization_id
+        }
+        
+        throw new Error(`No active organization found for platform ${platform}`)
+      }
+      
+      console.log(`[WebhookHandler] Found organization: ${data.organization_id} for pageId: ${pageId}`)
+      return data.organization_id
+    } catch (error) {
+      console.error('[WebhookHandler] Error getting organization ID:', error)
+      throw error
+    }
+  }
+
+  /**
    * Get or create customer
+   * FIXED: Now properly accepts and uses organizationId
    */
   private async getOrCreateCustomer(
     platform: Platform, 
     platformUserId: string,
-    supabase: SupabaseClient
+    supabase: SupabaseClient,
+    organizationId: string,
+    pageId?: string
   ) {
-    // Check existing customer
-    const { data: existingCustomer } = await supabase
-      .from('customers')
-      .select('*')
-      .eq(`platform_identities->${platform}->id`, platformUserId)
-      .single()
-    
-    if (existingCustomer) {
-      return existingCustomer
-    }
-    
-    // Create new customer
-    const { data: newCustomer, error } = await supabase
-      .from('customers')
-      .insert({
-        name: `${platform.charAt(0).toUpperCase() + platform.slice(1)} User`,
+    try {
+      // Check existing customer with organization_id
+      const { data: existingCustomer } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq(`platform_identities->${platform}->id`, platformUserId)
+        .single()
+      
+      if (existingCustomer) {
+        console.log('[WebhookHandler] Found existing customer:', existingCustomer.id)
+        
+        // Check if we need to update profile (no avatar or old data)
+        if (!existingCustomer.avatar_url || !existingCustomer.platform_identities[platform]?.name) {
+          console.log('[WebhookHandler] Customer missing profile data, fetching from Facebook...')
+          await this.updateCustomerProfile(platform, platformUserId, existingCustomer.id, supabase, pageId)
+        }
+        
+        return existingCustomer
+      }
+      
+      // For new customer, try to get profile from Facebook first
+      let profileData = null
+      if (platform === 'facebook' && pageId) {
+        profileData = await this.fetchFacebookProfile(platformUserId, pageId, supabase)
+      }
+      
+      // Create new customer with profile data if available
+      const customerData = {
+        name: profileData?.name || `${platform.charAt(0).toUpperCase() + platform.slice(1)} User`,
+        avatar_url: profileData?.profilePic || null,
         platform_identities: {
-          [platform]: { id: platformUserId }
+          [platform]: { 
+            id: platformUserId,
+            page_id: pageId,
+            ...profileData // Include all profile data
+          }
         },
-        organization_id: await this.getOrganizationId(platform, supabase),
+        organization_id: organizationId,
         last_contact_at: new Date().toISOString(),
         created_at: new Date().toISOString()
+      }
+      
+      console.log('[WebhookHandler] Creating new customer with data:', {
+        ...customerData,
+        avatar_url: customerData.avatar_url ? 'has avatar' : 'no avatar'
       })
-      .select()
-      .single()
-    
-    if (error) {
-      console.error('[WebhookHandler] Error creating customer:', error)
+      
+      const { data: newCustomer, error } = await supabase
+        .from('customers')
+        .insert(customerData)
+        .select()
+        .single()
+      
+      if (error) {
+        console.error('[WebhookHandler] Error creating customer:', error)
+        throw error
+      }
+      
+      console.log('[WebhookHandler] Created new customer:', newCustomer.id)
+      return newCustomer
+    } catch (error) {
+      console.error('[WebhookHandler] Error in getOrCreateCustomer:', error)
       throw error
     }
-    
-    console.log('[WebhookHandler] Created new customer:', newCustomer.id)
-    return newCustomer
+  }
+  
+  /**
+   * Fetch Facebook profile using page access token
+   */
+  private async fetchFacebookProfile(userId: string, pageId: string, supabase: SupabaseClient) {
+    try {
+      // Get page access token from platform_accounts
+      const { data: platformAccount } = await supabase
+        .from('platform_accounts')
+        .select('access_token')
+        .eq('platform', 'facebook')
+        .eq('account_id', pageId)
+        .single()
+      
+      if (!platformAccount?.access_token) {
+        console.log('[WebhookHandler] No access token found for page:', pageId)
+        return null
+      }
+      
+      // Call Facebook API
+      const API_VERSION = 'v18.0'
+      const response = await fetch(
+        `https://graph.facebook.com/${API_VERSION}/${userId}?fields=id,name,first_name,last_name,profile_pic,locale,timezone,gender&access_token=${platformAccount.access_token}`
+      )
+      
+      if (!response.ok) {
+        console.error('[WebhookHandler] Facebook API error:', await response.text())
+        return null
+      }
+      
+      const data = await response.json()
+      
+      console.log('[WebhookHandler] Fetched Facebook profile:', {
+        id: data.id,
+        name: data.name,
+        has_pic: !!data.profile_pic
+      })
+      
+      return {
+        id: data.id,
+        name: data.name,
+        firstName: data.first_name,
+        lastName: data.last_name,
+        profilePic: data.profile_pic,
+        locale: data.locale,
+        timezone: data.timezone,
+        gender: data.gender
+      }
+    } catch (error) {
+      console.error('[WebhookHandler] Error fetching Facebook profile:', error)
+      return null
+    }
+  }
+  
+  /**
+   * Update existing customer profile
+   */
+  private async updateCustomerProfile(
+    platform: Platform,
+    platformUserId: string,
+    customerId: string,
+    supabase: SupabaseClient,
+    pageId?: string
+  ) {
+    try {
+      if (platform !== 'facebook' || !pageId) return
+      
+      const profileData = await this.fetchFacebookProfile(platformUserId, pageId, supabase)
+      if (!profileData) return
+      
+      // Update customer with new profile data
+      const { error } = await supabase
+        .from('customers')
+        .update({
+          name: profileData.name,
+          avatar_url: profileData.profilePic,
+          platform_identities: {
+            [platform]: {
+              id: platformUserId,
+              page_id: pageId,
+              ...profileData,
+              lastUpdated: new Date().toISOString()
+            }
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', customerId)
+      
+      if (error) {
+        console.error('[WebhookHandler] Error updating customer profile:', error)
+      } else {
+        console.log('[WebhookHandler] Updated customer profile successfully')
+      }
+    } catch (error) {
+      console.error('[WebhookHandler] Error in updateCustomerProfile:', error)
+    }
   }
 
   /**
    * Get or create conversation
+   * FIXED: Now properly accepts and uses organizationId
    */
   private async getOrCreateConversation(
     platform: Platform,
     customerId: string,
     pageId: string,
     userId: string,
-    supabase: SupabaseClient
+    supabase: SupabaseClient,
+    organizationId: string
   ) {
-    // Check existing open conversation
-    const { data: existingConv } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('platform', platform)
-      .eq('customer_id', customerId)
-      .eq('status', 'open')
-      .single()
-    
-    if (existingConv) {
-      return existingConv
-    }
-    
-    // Create new conversation
-    const { data: newConv, error } = await supabase
-      .from('conversations')
-      .insert({
+    try {
+      const platform_conversation_id = `${pageId}_${userId}`
+      
+      // Check existing open conversation
+      const { data: existingConv } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('platform', platform)
+        .eq('platform_conversation_id', platform_conversation_id)
+        .eq('status', 'open')
+        .single()
+      
+      if (existingConv) {
+        console.log('[WebhookHandler] Found existing conversation:', existingConv.id)
+        return existingConv
+      }
+      
+      // Get platform_account UUID if needed
+      let platformAccountId = null
+      if (pageId) {
+        const { data: platformAccount } = await supabase
+          .from('platform_accounts')
+          .select('id')
+          .eq('platform', platform)
+          .eq('account_id', pageId)
+          .eq('organization_id', organizationId)
+          .single()
+        
+        platformAccountId = platformAccount?.id
+        console.log('[WebhookHandler] Platform account UUID:', platformAccountId)
+      }
+      
+      // Create new conversation with proper IDs
+      const conversationData = {
         platform,
         customer_id: customerId,
-        platform_conversation_id: `${pageId}_${userId}`,
+        platform_conversation_id,
+        platform_account_id: platformAccountId, // Use UUID if available
         status: 'open',
         priority: 'normal',
-        organization_id: await this.getOrganizationId(platform, supabase),
+        organization_id: organizationId, // Use the passed organizationId
         last_message_at: new Date().toISOString(),
         created_at: new Date().toISOString()
-      })
-      .select()
-      .single()
-    
-    if (error) {
-      console.error('[WebhookHandler] Error creating conversation:', error)
+      }
+      
+      console.log('[WebhookHandler] Creating new conversation with data:', conversationData)
+      
+      const { data: newConv, error } = await supabase
+        .from('conversations')
+        .insert(conversationData)
+        .select()
+        .single()
+      
+      if (error) {
+        console.error('[WebhookHandler] Error creating conversation:', error)
+        throw error
+      }
+      
+      console.log('[WebhookHandler] Created new conversation:', newConv.id)
+      return newConv
+    } catch (error) {
+      console.error('[WebhookHandler] Error in getOrCreateConversation:', error)
       throw error
     }
-    
-    console.log('[WebhookHandler] Created new conversation:', newConv.id)
-    return newConv
   }
 
   /**
@@ -513,24 +738,6 @@ export class WebhookHandler {
   }
 
   /**
-   * Get organization ID for platform
-   */
-  private async getOrganizationId(
-    platform: Platform,
-    supabase: SupabaseClient
-  ): Promise<string> {
-    // Get from platform_accounts
-    const { data } = await supabase
-      .from('platform_accounts')
-      .select('organization_id')
-      .eq('platform', platform)
-      .eq('is_active', true)
-      .single()
-    
-    return data?.organization_id || process.env.DEFAULT_ORG_ID || 'default-org-id'
-  }
-
-  /**
    * Update message status
    */
   private async updateMessageStatus(
@@ -569,7 +776,6 @@ export class WebhookHandler {
     watermark: number,
     supabase: SupabaseClient
   ) {
-    // Update all messages before watermark timestamp as read
     const { error } = await supabase
       .from('messages')
       .update({ 
@@ -579,7 +785,7 @@ export class WebhookHandler {
       })
       .eq('sender_id', senderId)
       .lte('created_at', new Date(watermark).toISOString())
-      .eq('sender_type', 'agent') // Only mark agent messages as read
+      .eq('sender_type', 'agent')
       .in('status', ['sent', 'delivered'])
     
     if (error) {
@@ -588,5 +794,5 @@ export class WebhookHandler {
   }
 }
 
-// Export instance ใหม่ทุกครั้ง (ไม่ใช่ singleton)
+// Export new instance (not singleton)
 export const webhookHandler = new WebhookHandler()
